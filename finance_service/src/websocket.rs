@@ -3,6 +3,7 @@ use std::{collections::HashMap, future::pending, sync::{Arc, atomic::{AtomicU64,
 use tokio::{net::TcpStream, time, sync::RwLock};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message};
 use futures_util::{SinkExt, StreamExt, stream::{self, SplitSink, SplitStream, iter}};
+use utils::database::PgPool;
 
 use crate::{types::{TradeData, TradeUpdate, WebSocketState}, websocket::trade_service::get_trades};
 
@@ -12,7 +13,7 @@ const UPDATE_BATCH_SIZE_DELAY: u64 = 500;
 
 const LOG_THROTTLE_INTERVAL: Duration = Duration::from_secs(5);
 
-pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String) {
+pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, _pool: Arc<PgPool>) {
     let state = Arc::new(RwLock::new(WebSocketState::new()));
     let url = format!("wss://ws.finnhub.io/?token={}", api_key);
 

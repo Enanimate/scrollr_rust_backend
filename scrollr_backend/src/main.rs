@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use finance_service::start_finance_services;
 use futures_util::future::join_all;
 use dotenv::dotenv;
-use utils::{info, init_async_logger};
+use utils::{database::initialize_pool, log::{info, init_async_logger}};
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +16,9 @@ async fn main() {
         Err(e) => eprintln!("Failed to set logger: {}", e)
     }
 
-    handles.push(tokio::spawn(start_finance_services()));
+    let database_pool = Arc::new(initialize_pool().await.unwrap());
+
+    handles.push(tokio::spawn(start_finance_services(database_pool)));
 
     join_all(handles).await;
 
