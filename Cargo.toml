@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "scrollr_backend",
-    "finance_service"
+    "finance_service",
+    "utils"
 ]
