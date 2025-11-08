@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "scrollr_backend",
+    "finance_service"
+]

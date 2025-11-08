@@ -1,0 +1,11 @@
+[package]
+name = "scrollr_backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+dotenv = "0.15"
+futures-util = "0.3"
+
+finance_service = { path = "../finance_service" }
