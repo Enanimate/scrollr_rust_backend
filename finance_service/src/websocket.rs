@@ -1,11 +1,12 @@
 use std::{collections::HashMap, future::pending, sync::{Arc, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 
+use reqwest::Client;
 use tokio::{net::TcpStream, time, sync::RwLock};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message};
 use futures_util::{SinkExt, StreamExt, stream::{self, SplitSink, SplitStream, iter}};
-use utils::database::PgPool;
+use utils::{database::{PgPool, finance::{DatabaseTradeData, Utc, get_trades, insert_symbol, update_previous_close, update_trade}}, log::{error, info, warn}};
 
-use crate::{types::{TradeData, TradeUpdate, WebSocketState}, websocket::trade_service::get_trades};
+use crate::{get_quote, types::{TradeData, TradeUpdate, WebSocketState}};
 
 const UPDATE_BATCH_SIZE: usize = 10;
 const UPDATE_BATCH_TIMEOUT: u64 = 1000;
@@ -13,7 +14,7 @@ const UPDATE_BATCH_SIZE_DELAY: u64 = 500;
 
 const LOG_THROTTLE_INTERVAL: Duration = Duration::from_secs(5);
 
-pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, _pool: Arc<PgPool>) {
+pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, client: Arc<Client>, pool: Arc<PgPool>) {
     let state = Arc::new(RwLock::new(WebSocketState::new()));
     let url = format!("wss://ws.finnhub.io/?token={}", api_key);
 
@@ -23,7 +24,7 @@ pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, _pool: 
     let (writer, reader) = ws_stream.split();
 
     tokio::spawn(ws_send(writer, subscriptions));
-    ws_read(reader, Arc::clone(&state)).await;
+    ws_read(reader, Arc::clone(&state), client, pool).await;
 }
 
 async fn ws_send(mut writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>, subscriptions: Vec<String>) {
@@ -37,7 +38,7 @@ async fn ws_send(mut writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>
     writer.send_all(&mut stream).await.unwrap();
 }
 
-async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>, state: Arc<RwLock<WebSocketState>>) {
+async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>, state: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>) {
     println!("Now listening for messages...");
     
     loop {
@@ -55,13 +56,13 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
                 state_w.batch_timer = None;
                 
                 if !state_w.is_processing_batch {
-                    println!("Timer fired, processing batch.");
+                    info!("Timer fired, processing batch.");
                     let state_clone = Arc::clone(&state);
 
                     drop(state_w);
-                    tokio::spawn(process_batch(state_clone));
+                    tokio::spawn(process_batch(state_clone, client.clone(), pool.clone()));
                 } else {
-                    println!("Timer fired, but a batch is already in process. Waiting.")
+                    info!("Timer fired, but a batch is already in process. Waiting.")
                 }
             }
 
@@ -103,7 +104,7 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
 
     if !state.read().await.update_queue.is_empty() {
         println!("Processing final batch before exit...");
-        process_batch(state).await;
+        process_batch(state, client, pool).await;
     }
 }
 
@@ -144,7 +145,7 @@ async fn schedule_batch_processing(state_arc: &Arc<RwLock<WebSocketState>>) {
     if let Some(timer) = &mut state.batch_timer {
         timer.as_mut().reset(time::Instant::now() + new_delay);
     } else {
-        println!(
+        info!(
             "Scheduling batch processing in {}ms (queue: {})",
             delay_ms,
             state.update_queue.len()
@@ -153,7 +154,7 @@ async fn schedule_batch_processing(state_arc: &Arc<RwLock<WebSocketState>>) {
     }
 }
 
-async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
+async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>) {
     let (trades, batch_num) = {
         let mut state = state_arc.write().await;
 
@@ -170,7 +171,7 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
         state.stats.batches_processed += 1;
         let batch_num = state.stats.batches_processed;
 
-        println!("Processing batch #{} with {} trades", batch_num, trades.len());
+        info!("Processing batch #{} with {} trades", batch_num, trades.len());
 
         (trades, batch_num)
     };
@@ -178,7 +179,7 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
     let processed_count = Arc::new(AtomicU64::new(0));
     let error_count = Arc::new(AtomicU64::new(0));
     let batch_result: Result<(), anyhow::Error> = async {
-        let all_trades = get_trades().await?;
+        let all_trades = get_trades(pool.clone()).await;
         let trades_map = Arc::new(
             all_trades.into_iter().map(|t| (t.symbol.clone(), t)).collect::<HashMap<_, _>>()
         );
@@ -190,9 +191,11 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
                 let trades_map_clone = Arc::clone(&trades_map);
                 let proc_clone = Arc::clone(&processed_count);
                 let err_clone = Arc::clone(&error_count);
+                let client_clone = Arc::clone(&client);
+                let pool_clone = Arc::clone(&pool);
 
                 async move {
-                    match process_single_trade(trade, trades_map_clone).await {
+                    match process_single_trade(trade, trades_map_clone, client_clone, pool_clone).await {
                         Ok(_) => {
                             proc_clone.fetch_add(1, Ordering::SeqCst);
                         }
@@ -225,10 +228,10 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
 
             if should_log {
                 state.last_log_time = Some(now);
-                println!("Batch #{} complete: {} processed, {} errors",
+                info!("Batch #{} complete: {} processed, {} errors",
                     batch_num, processed, errors
                 );
-                println!("Total updates processed: {}", state.stats.total_updates_processed);
+                info!("Total updates processed: {}", state.stats.total_updates_processed);
             }
         }
         Err(e) => {
@@ -238,40 +241,96 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>) {
     }
 
     if !state.update_queue.is_empty() {
-        println!("More trades queued ({}), scheduling next batch", state.update_queue.len());
+        info!("More trades queued ({}), scheduling next batch", state.update_queue.len());
         drop(state);
         schedule_batch_processing(&state_arc).await;
     }
 }
 
-async fn process_single_trade(trade: TradeData, trades_map: Arc<HashMap<String, TradeData>>) -> Result<(), anyhow::Error> {
-    if let Some(db_trade) = trades_map.get(&trade.symbol) {
-        println!("Processing {}: new price ${}, db_price ${}", trade.symbol, trade.price, db_trade.price);
-    } else {
-        println!("Processing {}: new symbol, price ${}", trade.symbol, trade.price);
+async fn process_single_trade(trade: TradeData, trades_map: Arc<HashMap<String, DatabaseTradeData>>, client: Arc<Client>, pool: Arc<PgPool>) -> anyhow::Result<()> {
+    let (symbol, price) = (trade.symbol, trade.price);
+
+    let existing_record = trades_map.get(&symbol).cloned();
+    let mut current_record = existing_record.unwrap_or_else(|| {
+        info!("Inserting new symbol {}", symbol);
+
+        let pool_clone = Arc::clone(&pool);
+        let symbol_clone = symbol.clone();
+        tokio::spawn(async move {
+            insert_symbol(pool_clone, symbol_clone).await;
+        });
+
+        DatabaseTradeData {
+            symbol: symbol.clone(),
+            price,
+            previous_close: 0.0,
+            price_change: 0.0,
+            percentage_change: 0.0,
+            direction: String::from("up"),
+            last_updated: Utc::now(),
+        }
+    });
+
+    if current_record.previous_close <= 0.0 {
+        info!("Fetching quote for {}", symbol);
+
+        let mut determined_previous_close: Option<f64> = None;
+
+        match get_quote(symbol.clone(), client).await {
+            Ok(quote) => {
+                if quote.previous_close > 0.0 {
+                    determined_previous_close = Some(quote.previous_close);
+                } else if quote.current_price > 0.0 {
+                    determined_previous_close = Some(quote.current_price);
+                }
+            }
+
+            Err(e) => {
+                error!("Qutoe API error for {}: {}", symbol, e);
+            }
+        }
+
+        if determined_previous_close.is_none() {
+            warn!("Qutoe unavailable for {}, using live price fallback", symbol);
+            determined_previous_close = Some(price);
+        }
+
+        if let Some(pc) = determined_previous_close {
+            current_record.previous_close = pc;
+            update_previous_close(Arc::clone(&pool), symbol.clone(), pc).await;
+        }
     }
 
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    if current_record.previous_close <= 0.0 {
+        warn!("Skipping {}, unable to determine previous close", symbol);
+        return Ok(());
+    }
+
+    let previous_close = current_record.previous_close;
+    let current_price = price;
+
+    if current_price <= 0.0 {
+        warn!("Invalid prices for {}: current={}", symbol, current_price);
+        return Ok(());
+    }
+
+    let price_change = current_price - previous_close;
+    let percentage_change = if previous_close == 0.0 {
+        0.0
+    } else {
+        (price_change / previous_close) * 100.0
+    };
+
+    let direction = if price_change >= 0.0 { "up" } else { "down" };
+
+    update_trade(
+        Arc::clone(&pool), 
+        symbol.clone(), 
+        current_price, 
+        price_change, 
+        percentage_change, 
+        direction
+    ).await;
 
     Ok(())
-}
-
-pub mod trade_service {
-    use std::time::Duration;
-
-    use super::TradeData;
-    use anyhow::Result;
-
-    pub async fn get_trades() -> Result<Vec<TradeData>, anyhow::Error> {
-        println!("Simulating database call 'get_trades()'...");
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
-        let mock_data = vec![
-            TradeData { symbol: "AAPL".to_string(), price: 150.0, timestamp: 0 },
-            TradeData { symbol: "MSFT".to_string(), price: 300.0, timestamp: 0 },
-        ];
-
-        println!("Database call complete.");
-        Ok(mock_data)
-    }
 }

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 pub use sqlx::PgPool;
 
+#[cfg(feature = "finance")]
 pub mod finance;
 
 pub async fn initialize_pool() -> Result<PgPool> {

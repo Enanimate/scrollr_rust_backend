@@ -1,5 +1,6 @@
-use std::{collections::HashMap, env, fs, pin::Pin, time::Instant};
+use std::{collections::HashMap, env, fs, pin::Pin, sync::Arc, time::{Duration, Instant}};
 
+use reqwest::{Client, header::{HeaderMap, HeaderValue}};
 use serde::Deserialize;
 use tokio::time::Sleep;
 
@@ -27,6 +28,18 @@ pub(crate) struct BatchStats {
     pub errors: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct QuoteResponse {
+    #[serde(rename = "c")]
+    pub current_price: f64,
+    #[serde(rename = "d")]
+    pub change: f64,
+    #[serde(rename = "dp")]
+    pub percent_change: f64,
+    #[serde(rename = "pc")]
+    pub previous_close: f64
+}
+
 pub(crate) struct WebSocketState {
     pub update_queue: HashMap<String, TradeData>,
     pub batch_timer: Option<Pin<Box<Sleep>>>,
@@ -50,6 +63,7 @@ impl WebSocketState {
 pub(crate) struct FinanceState {
     pub api_key: String,
     pub subscriptions: Vec<String>,
+    pub client: Arc<Client>
 }
 
 impl FinanceState {
@@ -59,9 +73,18 @@ impl FinanceState {
 
         let api_key = env::var("FINNHUB_API_KEY").unwrap();
 
+        let mut headers: HeaderMap = HeaderMap::new();
+        headers.append("X-Finnhub-Token", HeaderValue::from_str(&api_key).unwrap());
+
+        let client = Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_millis(10_000))
+            .build().unwrap();
+
         Self {
             api_key,
             subscriptions,
+            client: Arc::new(client)
         }
     }
 }

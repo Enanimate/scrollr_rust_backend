@@ -2,7 +2,7 @@ use std::{fs::File, io::Write, path::PathBuf, sync::OnceLock};
 use log::{Level, Log};
 use tokio::sync::mpsc;
 
-pub use log::{info, error};
+pub use log::{info, error, warn, };
 
 type LogMessage = String;
 
@@ -46,37 +46,24 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
     println!("Starting async log writer task...");
 
     let mut log_buffer = String::new();
+    const LOG_BUFFER_FLUSH_SIZE: usize = 8192;
 
-    loop {
-        match receiver.try_recv() {
-            Ok(msg) => {
-                log_buffer.push_str(&msg);
-                log_buffer.push('\n');
 
-                if log_buffer.len() > 8192 {
-                    if let Err(e) = file.write_all(log_buffer.as_bytes()) {
-                        eprintln!("Error writing log data to disk: {}", e);
-                    }
+    while let Some(msg) = receiver.recv().await {
+        println!("{msg}");
 
-                    log_buffer.clear();
-                }
+        log_buffer.push_str(&msg);
+        log_buffer.push('\n');
+
+        if log_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
+            if let Err(e) = file.write_all(log_buffer.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
             }
-
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                break;
-            }
-
-            Err(mpsc::error::TryRecvError::Empty) => {
-                if !log_buffer.is_empty() {
-                    if let Err(e) = file.write_all(log_buffer.as_bytes()) {
-                        eprintln!("Error writing remaining log data to disk: {}", e);
-                    }
-                    log_buffer.clear();
-                }
-                tokio::task::yield_now().await;
-            }
+            log_buffer.clear();
         }
     }
+
+    println!("Log writer task finished.");
 }
 
 const LOG_CHANNEL_CAPACITY: usize = 1000; 
