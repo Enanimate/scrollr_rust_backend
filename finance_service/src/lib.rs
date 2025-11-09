@@ -1,19 +1,94 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
+use futures_util::future::join_all;
 use reqwest::Client;
-use utils::database::PgPool;
+use tokio::time;
+use utils::{database::{PgPool, finance::{insert_symbol, update_previous_close, update_trade}}, log::{debug, info, warn}};
 
 use crate::{types::{FinanceState, QuoteResponse}, websocket::connect};
 
 mod types;
 mod websocket;
 
+/// Broadly starts all finance related services and initialization.
 pub async fn start_finance_services(pool: Arc<PgPool>) {
-    let state = FinanceState::new();
+    // Initialization
+    let state = FinanceState::new(Arc::clone(&pool));
+    initialize_symbols(state.clone()).await;
+    update_all_previous_closes(state.clone()).await;
+
 
     connect(state.subscriptions, state.api_key, state.client, pool).await;
 }
 
+/// Initializes a pre-selected set of Finnhub symbols
+/// within the database.
+async fn initialize_symbols(state: FinanceState) {
+    info!("Initializing symbols in database...");
+
+    let batch_size = 5;
+    for batch in state.subscriptions.chunks(batch_size) {
+        time::sleep(Duration::from_millis(100)).await;
+
+        let futures: Vec<_> = batch.iter().map(|symbol| {
+            let symbol_clone = symbol.to_string();
+            let pool = state.pool.clone();
+
+            async move {
+                insert_symbol(pool, symbol_clone.clone()).await;
+            }
+        }).collect();
+        
+        join_all(futures).await;
+    }
+
+    info!("[ Finnhub ] Symbol initialization complete")
+}
+
+/// Intended to be run once daily via a HTTP request from Supabase.
+/// This will also be run once at startup, to populate the database
+/// with a as up-to-date information as is possible.
+async fn update_all_previous_closes(state: FinanceState) {
+    info!("Updating previous closes...");
+
+    let batch_size = 3;
+
+    for batch in state.subscriptions.chunks(batch_size) {
+        time::sleep(Duration::from_millis(1_500)).await;
+        let futures: Vec<_> = batch.iter().map(|symbol| {
+            let client = state.client.clone();
+            let pool = &state.pool;
+            async move {
+                let quote_response = get_quote(symbol.to_string(), client).await;
+
+                match quote_response {
+                    Ok(quote) => {
+
+                        update_previous_close(pool.clone(), symbol.to_string(), quote.previous_close).await;
+
+                        debug!("{symbol} previous close update: {}", quote.previous_close);
+
+                        if quote.change > 0.0 || quote.change < 0.0 {
+                            let direction = if quote.change >= 0.0 {
+                                "up"
+                            } else {
+                                "down"
+                            };
+                            update_trade(pool.clone(), symbol.to_string(), quote.current_price, quote.change, quote.percent_change, direction).await;
+                        }
+                    }
+                    Err(e) => warn!("[ Finnhub ] Quote Error: {e}"),
+                }
+                
+            }
+        }).collect();
+
+        join_all(futures).await;
+    }
+    info!("[ Finnhub ] Previous closes update complete.");
+}
+
+/// Primary way through which the Finnhub HTTP API is accessed.
 async fn get_quote(symbol: String, client: Arc<Client>) -> anyhow::Result<QuoteResponse> {
         let request = client.get(format!("https://finnhub.io/api/v1/quote?symbol={}", symbol)).build()?;
 

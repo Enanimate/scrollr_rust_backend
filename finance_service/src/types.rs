@@ -3,6 +3,7 @@ use std::{collections::HashMap, env, fs, pin::Pin, sync::Arc, time::{Duration, I
 use reqwest::{Client, header::{HeaderMap, HeaderValue}};
 use serde::Deserialize;
 use tokio::time::Sleep;
+use utils::database::PgPool;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct TradeUpdate {
@@ -60,14 +61,16 @@ impl WebSocketState {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct FinanceState {
     pub api_key: String,
     pub subscriptions: Vec<String>,
-    pub client: Arc<Client>
+    pub client: Arc<Client>,
+    pub pool: Arc<PgPool>,
 }
 
 impl FinanceState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(pool: Arc<PgPool>) -> Self {
         let file_contents = fs::read_to_string("./subscriptions.json").unwrap();
         let subscriptions = serde_json::from_str(&file_contents).unwrap();
 
@@ -84,7 +87,8 @@ impl FinanceState {
         Self {
             api_key,
             subscriptions,
-            client: Arc::new(client)
+            client: Arc::new(client),
+            pool,
         }
     }
 }
