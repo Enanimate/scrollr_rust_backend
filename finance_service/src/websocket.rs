@@ -75,20 +75,24 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
                                 if update.message_type == "trade" {
                                     handle_trade_update_batch(update.data, &state).await;
                                 } else if update.message_type == "error" {
-                                    eprintln!("Error message from websocket: {}", msg.to_string());
+                                    error!("Error message from websocket: {}", msg.to_string());
                                 } else {
-                                    eprintln!("Non-trade message: {:#?}", update)
+                                    warn!("Non-trade message: {:#?}", update)
                                 }
                             } else {
-                                eprintln!("Unexpected websocket message format: {}", msg.to_string());
+                                if msg.to_string().contains("error") {
+                                    error!("Error message from websocket: {}", msg.to_string());
+                                } else {
+                                    warn!("Unexpected websocket message format: {}", msg.to_string());
+                                }
                             }
                         } else if msg.is_close() {
-                            println!("Server closed connection");
+                            error!("Server closed connection");
                             break;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error receiving message: {}", e);
+                        error!("Error receiving message: {}", e);
                         break;
                     }
                 }
@@ -100,10 +104,10 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
         }
     }
 
-    println!("WebSocket read loop completed.");
+    info!("WebSocket read loop completed.");
 
     if !state.read().await.update_queue.is_empty() {
-        println!("Processing final batch before exit...");
+        info!("Processing final batch before exit...");
         process_batch(state, client, pool).await;
     }
 }
@@ -159,7 +163,7 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
         let mut state = state_arc.write().await;
 
         if state.is_processing_batch || state.update_queue.is_empty() {
-            println!("Skipping batch processing (processing: {}, queue: {})", state.is_processing_batch, state.update_queue.len());
+            info!("Skipping batch processing (processing: {}, queue: {})", state.is_processing_batch, state.update_queue.len());
             return;
         }
 
@@ -201,7 +205,7 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
                         }
                         Err(e) => {
                             err_clone.fetch_add(1, Ordering::SeqCst);
-                            eprintln!("Error processing trade: {}", e);
+                            warn!("Error processing trade: {}", e);
                         }
                     }
                 }
@@ -235,7 +239,7 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
             }
         }
         Err(e) => {
-            eprintln!("Batch #{} processing error: {}", batch_num, e);
+            warn!("Batch #{} processing error: {}", batch_num, e);
             state.stats.errors += 1;
         }
     }
