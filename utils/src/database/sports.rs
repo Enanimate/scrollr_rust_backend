@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 use chrono::Utc;
 use log::{error, info};
 use serde::Deserialize;
-use sqlx::{PgPool, query};
+use sqlx::{PgPool, prelude::FromRow, query, query_as};
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct LeagueConfigs {
     pub name: String,
     pub slug: String,
@@ -30,7 +30,40 @@ pub struct Team {
     pub score: i32
 }
 
-pub async fn create_tables(pool: Arc<PgPool>) {
+pub struct LiveLeagueList {
+    data: Vec<LiveByLeague>,
+}
+
+impl LiveLeagueList {
+    pub fn new(data: Vec<LiveByLeague>) -> Self {
+        LiveLeagueList { data }
+    }
+}
+
+impl Display for LiveLeagueList  {
+    /// Formats the entire vector as a bulleted list.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for item in self.data.iter() {
+            write!(f, "{} ", item)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(FromRow, Debug)]
+pub struct LiveByLeague {
+    league: String,
+    count: i64,
+}
+
+impl Display for LiveByLeague {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.league, self.count)
+    }
+}
+
+pub async fn create_tables(pool: &Arc<PgPool>) {
     let statement = "
         CREATE TABLE IF NOT EXISTS games (
             id SERIAL PRIMARY KEY,
@@ -151,5 +184,33 @@ pub async fn upsert_game(pool: Arc<PgPool>, game: CleanedData) {
             .inspect_err(|e| error!("Execution Error: {}", e));
     } else {
         error!("Connection Error: Failed to acquire a connection from the pool");
+    }
+}
+
+pub async fn get_live_games(pool: &Arc<PgPool>) -> LiveLeagueList {
+    //TODO: This should be be pre! Testing only
+    let statement = "
+        SELECT league, COUNT(*) as count
+        FROM games
+        WHERE state = 'in'
+        GROUP BY league;
+    ";
+
+    let conn = pool.acquire().await;
+
+    if let Ok(mut connection) = conn {
+        let result: Result<Vec<LiveByLeague>, sqlx::Error>= query_as(statement)
+            .fetch_all(&mut *connection)
+            .await
+            .inspect_err(|e| error!("Execution Error: {}", e));
+
+        if let Ok(data) = result {
+            return LiveLeagueList::new(data);
+        } else {
+            return LiveLeagueList::new(Vec::new());
+        }
+    } else {
+        error!("Connection Error: Failed to acquire a connection from the pool");
+        return LiveLeagueList::new(Vec::new());
     }
 }

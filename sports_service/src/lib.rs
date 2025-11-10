@@ -1,7 +1,7 @@
 use std::{fs, sync::Arc};
 use chrono::NaiveDateTime;
 use reqwest::Client;
-use utils::{database::{PgPool, sports::{CleanedData, Team, clear_tables, create_tables, upsert_game}}, log::info};
+use utils::{database::{PgPool, sports::{CleanedData, Team, clear_tables, create_tables, get_live_games, upsert_game}}, log::info};
 
 use utils::database::sports::LeagueConfigs;
 
@@ -13,16 +13,24 @@ pub async fn start_sports_service(pool: Arc<PgPool>) {
     info!("Starting sports service...");
 
     info!("Creating sports tables...");
-    create_tables(pool.clone()).await;
+    create_tables(&pool).await;
 
     let file_contents = fs::read_to_string("./leagues.json").unwrap();
     let leagues_to_ingest: Vec<LeagueConfigs> = serde_json::from_str(&file_contents).unwrap();
 
     info!("Beginning league ingest");
-    ingest_data(leagues_to_ingest, pool).await;
+    ingest_data(leagues_to_ingest, &pool).await;
+
+    let live_games = get_live_games(&pool).await;
+    info!("Current live games by league: {}", live_games);
 }
 
-async fn ingest_data(leagues: Vec<LeagueConfigs>, pool: Arc<PgPool>) {
+pub async fn frequent_poll(leagues: Vec<LeagueConfigs>, pool: &Arc<PgPool>) {
+    info!("Frequent poll called for: {:?}", leagues);
+    ingest_data(leagues, pool).await;
+}
+
+async fn ingest_data(leagues: Vec<LeagueConfigs>, pool: &Arc<PgPool>) {
     clear_tables(pool.clone(), leagues.clone()).await;
 
     let client = Client::new();
@@ -78,3 +86,5 @@ async fn ingest_data(leagues: Vec<LeagueConfigs>, pool: Arc<PgPool>) {
         }
     }
 }
+
+

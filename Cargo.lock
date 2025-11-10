@@ -1513,6 +1513,7 @@ dependencies = [
  "finance_service",
  "futures-util",
  "serde",
+ "serde_json",
  "sports_service",
  "tokio",
  "utils",
