@@ -71,7 +71,7 @@ pub struct FinanceState {
 
 impl FinanceState {
     pub fn new(pool: Arc<PgPool>) -> Self {
-        let file_contents = fs::read_to_string("./subscriptions.json").unwrap();
+        let file_contents = fs::read_to_string("./configs/subscriptions.json").unwrap();
         let subscriptions = serde_json::from_str(&file_contents).unwrap();
 
         let api_key = env::var("FINNHUB_API_KEY").unwrap();

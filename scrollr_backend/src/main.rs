@@ -53,7 +53,7 @@ async fn handler(State(db_pool): State<PgPool>, Json(payload): Json<SchedulePayl
             info!("Starting frequent polling for the following leagues {:?}", payload.data);
             let mut leagues = Vec::new();
 
-            let file_contents = fs::read_to_string("./leagues.json").unwrap();
+            let file_contents = fs::read_to_string("./configs/leagues.json").unwrap();
             let leagues_to_ingest: Vec<LeagueConfigs> = serde_json::from_str(&file_contents).unwrap();
 
             for league in leagues_to_ingest {

@@ -41,7 +41,6 @@ impl LiveLeagueList {
 }
 
 impl Display for LiveLeagueList  {
-    /// Formats the entire vector as a bulleted list.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for item in self.data.iter() {
             write!(f, "{} ", item)?;

@@ -15,7 +15,7 @@ pub async fn start_sports_service(pool: Arc<PgPool>) {
     info!("Creating sports tables...");
     create_tables(&pool).await;
 
-    let file_contents = fs::read_to_string("./leagues.json").unwrap();
+    let file_contents = fs::read_to_string("./configs/leagues.json").unwrap();
     let leagues_to_ingest: Vec<LeagueConfigs> = serde_json::from_str(&file_contents).unwrap();
 
     info!("Beginning league ingest");
