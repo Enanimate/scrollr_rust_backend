@@ -51,10 +51,19 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
         }
     };
 
+    let mut backend = match File::create(format!("{log_file_path}/backend.log")) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Fatal: Could not create log file at {:?}: {}", "backend.log", e);
+            return;
+        }
+    };
+
     println!("Starting async log writer task...");
 
     let mut sports_buffer = String::new();
     let mut finance_buffer = String::new();
+    let mut backend_buffer = String::new();
     const LOG_BUFFER_FLUSH_SIZE: usize = 8192;
 
 
@@ -71,6 +80,11 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
             sports_buffer.push('\n');
         }
 
+        if msg.contains("backend") {
+            backend_buffer.push_str(&msg);
+            backend_buffer.push('\n');
+        }
+
         if finance_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
             if let Err(e) = finance.write_all(finance_buffer.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
@@ -83,6 +97,13 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
                 eprintln!("Error writing log data to disk: {}", e);
             }
             sports_buffer.clear();
+        }
+
+        if backend_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
+            if let Err(e) = backend.write_all(backend_buffer.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
+            backend_buffer.clear();
         }
     }
 
