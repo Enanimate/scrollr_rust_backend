@@ -62,7 +62,7 @@ impl WebSocketState {
 }
 
 #[derive(Clone)]
-pub(crate) struct FinanceState {
+pub struct FinanceState {
     pub api_key: String,
     pub subscriptions: Vec<String>,
     pub client: Arc<Client>,
@@ -70,7 +70,7 @@ pub(crate) struct FinanceState {
 }
 
 impl FinanceState {
-    pub(crate) fn new(pool: Arc<PgPool>) -> Self {
+    pub fn new(pool: Arc<PgPool>) -> Self {
         let file_contents = fs::read_to_string("./subscriptions.json").unwrap();
         let subscriptions = serde_json::from_str(&file_contents).unwrap();
 

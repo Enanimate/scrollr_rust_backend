@@ -7,6 +7,9 @@ pub use sqlx::PgPool;
 #[cfg(feature = "finance")]
 pub mod finance;
 
+#[cfg(feature = "sports")]
+pub mod sports;
+
 pub async fn initialize_pool() -> Result<PgPool> {
     let get_env_var = |key: &str| -> Result<String> {
         env::var(key).with_context(|| format!("Missing environment variable: {}", key))

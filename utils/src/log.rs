@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, path::PathBuf, sync::OnceLock};
+use std::{fs::File, io::Write, sync::OnceLock};
 use log::{Level, Log};
 use tokio::sync::mpsc;
 
@@ -34,32 +34,55 @@ impl Log for AsyncLogger {
     fn flush(&self) {}
 }
 
-pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_path: PathBuf) {
-    let mut file = match File::create(&log_file_path) {
+pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_path: String) {
+    let mut finance = match File::create(format!("{log_file_path}/finance.log")) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Fatal: Could not create log file at {:?}: {}", log_file_path, e);
+            eprintln!("Fatal: Could not create log file at {:?}: {}", "finance.log", e);
+            return;
+        }
+    };
+
+    let mut sports = match File::create(format!("{log_file_path}/sports.log")) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Fatal: Could not create log file at {:?}: {}", "sports.log", e);
             return;
         }
     };
 
     println!("Starting async log writer task...");
 
-    let mut log_buffer = String::new();
+    let mut sports_buffer = String::new();
+    let mut finance_buffer = String::new();
     const LOG_BUFFER_FLUSH_SIZE: usize = 8192;
 
 
     while let Some(msg) = receiver.recv().await {
         println!("{msg}");
 
-        log_buffer.push_str(&msg);
-        log_buffer.push('\n');
+        if msg.contains("finance") {
+            finance_buffer.push_str(&msg);
+            finance_buffer.push('\n');
+        }
 
-        if log_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
-            if let Err(e) = file.write_all(log_buffer.as_bytes()) {
+        if msg.contains("sports") {
+            sports_buffer.push_str(&msg);
+            sports_buffer.push('\n');
+        }
+
+        if finance_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
+            if let Err(e) = finance.write_all(finance_buffer.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
-            log_buffer.clear();
+            finance_buffer.clear();
+        }
+
+        if sports_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
+            if let Err(e) = sports.write_all(sports_buffer.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
+            sports_buffer.clear();
         }
     }
 
@@ -68,7 +91,7 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
 
 const LOG_CHANNEL_CAPACITY: usize = 1000; 
 
-pub fn init_async_logger(log_path: PathBuf) -> Result<(), log::SetLoggerError> {
+pub fn init_async_logger(log_path: &str) -> Result<(), log::SetLoggerError> {
     let (sender, receiver) = mpsc::channel(LOG_CHANNEL_CAPACITY);
 
     let logger = AsyncLogger { sender };
@@ -77,7 +100,7 @@ pub fn init_async_logger(log_path: PathBuf) -> Result<(), log::SetLoggerError> {
         .map(|()| log::set_max_level(log::LevelFilter::Info));
 
     if res.is_ok() {
-        tokio::spawn(log_writer_task(receiver, log_path));
+        tokio::spawn(log_writer_task(receiver, log_path.to_owned()));
     }
 
     res

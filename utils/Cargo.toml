@@ -9,6 +9,8 @@ tokio = { version = "1.48", features = ["sync"] }
 chrono = "0.4"
 sqlx = {version = "0.8", features = ["postgres", "runtime-tokio", "tls-native-tls", "chrono"]}
 anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [features]
 finance = []
+sports = []

@@ -3,20 +3,22 @@ use std::{sync::Arc, time::Duration};
 use futures_util::future::join_all;
 use reqwest::Client;
 use tokio::time;
-use utils::{database::{PgPool, finance::{insert_symbol, update_previous_close, update_trade}}, log::{debug, info, warn}};
+use utils::{database::{PgPool, finance::{create_tables, insert_symbol, update_previous_close, update_trade}}, log::{debug, info, warn}};
 
 use crate::{types::{FinanceState, QuoteResponse}, websocket::connect};
 
-mod types;
+pub mod types;
 mod websocket;
 
 /// Broadly starts all finance related services and initialization.
 pub async fn start_finance_services(pool: Arc<PgPool>) {
+    info!("Starting finance service...");
     // Initialization
     let state = FinanceState::new(Arc::clone(&pool));
+    info!("Creating sports tables...");
+    create_tables(pool.clone()).await;
     initialize_symbols(state.clone()).await;
     update_all_previous_closes(state.clone()).await;
-
 
     connect(state.subscriptions, state.api_key, state.client, pool).await;
 }
@@ -48,7 +50,7 @@ async fn initialize_symbols(state: FinanceState) {
 /// Intended to be run once daily via a HTTP request from Supabase.
 /// This will also be run once at startup, to populate the database
 /// with a as up-to-date information as is possible.
-async fn update_all_previous_closes(state: FinanceState) {
+pub async fn update_all_previous_closes(state: FinanceState) {
     info!("Updating previous closes...");
 
     let batch_size = 3;
