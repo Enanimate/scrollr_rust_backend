@@ -1,6 +1,7 @@
-use std::{fs, sync::Arc};
+use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{Json, Router, debug_handler, extract::State, routing::{get, post}};
+use axum_server::tls_rustls::RustlsConfig;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::future::join_all;
 use dotenv::dotenv;
@@ -24,13 +25,22 @@ async fn main() {
     handles.push(tokio::spawn(start_finance_services(arc_pool.clone())));
     handles.push(tokio::spawn(start_sports_service(arc_pool)));
 
+    let config = RustlsConfig::from_pem_file(
+        PathBuf::from(env::var("CERT_PATH").expect("Cert path needs to be included in .env!")),
+        PathBuf::from(env::var("KEY_PATH").expect("Key path needs to be included in .env!"))
+    ).await.expect("Failed to set TLS config");
+
     let app = Router::new()
         .route("/", post(handler))
         .route("/finance", get(|| async { "Hello, World!" }))
         .with_state(database_pool);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+
+    axum_server::bind_rustls(addr, config)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 
     join_all(handles).await;
 

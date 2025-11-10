@@ -79,7 +79,7 @@ pub async fn update_all_previous_closes(state: FinanceState) {
                             update_trade(pool.clone(), symbol.to_string(), quote.current_price, quote.change, quote.percent_change, direction).await;
                         }
                     }
-                    Err(e) => warn!("[ Finnhub ] Quote Error: {e}"),
+                    Err(e) => warn!("[ Finnhub ] Quote Error for {}: {e}", symbol),
                 }
                 
             }

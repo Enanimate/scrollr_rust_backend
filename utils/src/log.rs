@@ -64,7 +64,7 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
     let mut sports_buffer = String::new();
     let mut finance_buffer = String::new();
     let mut backend_buffer = String::new();
-    const LOG_BUFFER_FLUSH_SIZE: usize = 8192;
+    const LOG_BUFFER_FLUSH_SIZE: usize = 1;
 
 
     while let Some(msg) = receiver.recv().await {
