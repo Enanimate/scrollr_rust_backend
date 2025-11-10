@@ -11,6 +11,8 @@ axum = { version = "0.8", features = ["macros"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
+tokio-rustls-acme = { version = "0.8", features = ["axum"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 finance_service = { path = "../finance_service" }
 sports_service = { path = "../sports_service" }

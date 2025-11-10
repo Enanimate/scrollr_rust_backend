@@ -1,4 +1,4 @@
 /target
 .env
 *.log
-*.pem
+/acme_cache

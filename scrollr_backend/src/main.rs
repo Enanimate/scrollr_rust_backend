@@ -1,17 +1,18 @@
 use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{Json, Router, debug_handler, extract::State, routing::{get, post}};
-use axum_server::tls_rustls::RustlsConfig;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
-use futures_util::future::join_all;
+use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
 use scrollr_backend::SchedulePayload;
 use sports_service::{frequent_poll, start_sports_service};
-use utils::{database::{PgPool, initialize_pool, sports::LeagueConfigs}, log::{info, init_async_logger, warn}};
+use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
+use utils::{database::{PgPool, initialize_pool, sports::LeagueConfigs}, log::{error, info, init_async_logger, warn}};
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+    rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     match init_async_logger("./logs") {
@@ -25,19 +26,40 @@ async fn main() {
     handles.push(tokio::spawn(start_finance_services(arc_pool.clone())));
     handles.push(tokio::spawn(start_sports_service(arc_pool)));
 
-    let config = RustlsConfig::from_pem_file(
-        PathBuf::from(env::var("CERT_PATH").expect("Cert path needs to be included in .env!")),
-        PathBuf::from(env::var("KEY_PATH").expect("Key path needs to be included in .env!"))
-    ).await.expect("Failed to set TLS config");
+    let domain_name = env::var("DOMAIN_NAME").expect("Domain name needs to be specified in .env!");
+    let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
+
+    let cache_dir = PathBuf::from("./acme_cache");
+
+    let mut state = AcmeConfig::new(vec![domain_name])
+        .contact(vec![format!("mailto:{}", contact_email)])
+        .cache_option(Some(cache_dir).map(DirCache::new))
+        .directory_lets_encrypt(true)
+        .state();
+
+    let rustls_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(state.resolver());
+    let acceptor = state.axum_acceptor(Arc::new(rustls_config));
+
+    tokio::spawn(async move {
+        loop {
+            match state.next().await.unwrap() {
+                Ok(ok) => info!("event: {ok:?}"),
+                Err(err) => error!("error: {err:?}"),
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/", post(handler))
         .route("/finance", get(|| async { "Hello, World!" }))
         .with_state(database_pool);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
 
-    axum_server::bind_rustls(addr, config)
+    axum_server::bind(addr)
+        .acceptor(acceptor)
         .serve(app.into_make_service())
         .await
         .unwrap();
