@@ -1,13 +1,15 @@
 use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use axum::{Json, Router, debug_handler, extract::State, routing::{get, post}};
+use axum::{Json, Router, extract::{Query, State}, response::{IntoResponse, Redirect, Response}, routing::{get, post}};
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
-use scrollr_backend::SchedulePayload;
+use scrollr_backend::{SchedulePayload, ServerState};
+use serde::Deserialize;
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
-use utils::{database::{PgPool, initialize_pool, sports::LeagueConfigs}, log::{error, info, init_async_logger, warn}};
+use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
+use yahoo_fantasy::{exchange_for_token, start_fantasy_service, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -20,11 +22,11 @@ async fn main() {
         Err(e) => eprintln!("Failed to set logger: {}", e)
     }
 
-    let database_pool = initialize_pool().await.unwrap();
-    let arc_pool = Arc::new(database_pool.clone());
+    let web_state = ServerState::new().await;
 
-    handles.push(tokio::spawn(start_finance_services(arc_pool.clone())));
-    handles.push(tokio::spawn(start_sports_service(arc_pool)));
+    handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone())));
+    handles.push(tokio::spawn(start_sports_service(web_state.db_pool.clone())));
+    handles.push(tokio::spawn(start_fantasy_service(web_state.db_pool.clone())));
 
     let domain_name = env::var("DOMAIN_NAME").expect("Domain name needs to be specified in .env!");
     let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
@@ -53,8 +55,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/", post(handler))
+        .route("/start", get(get_yahoo_handler))
+        .route("/callback", get(yahoo_callback))
         .route("/finance", get(|| async { "Hello, World!" }))
-        .with_state(database_pool);
+        .with_state(web_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
 
@@ -69,9 +73,8 @@ async fn main() {
     println!("Closing...")
 }
 
-#[debug_handler]
-async fn handler(State(db_pool): State<PgPool>, Json(payload): Json<SchedulePayload>) {
-    let pool = Arc::new(db_pool);
+async fn handler(State(web_state): State<ServerState>, Json(payload): Json<SchedulePayload>) {
+    let pool = web_state.db_pool;
     match payload.schedule_type.as_str() {
         "finance" => {
             let state = FinanceState::new(pool);
@@ -99,3 +102,24 @@ async fn handler(State(db_pool): State<PgPool>, Json(payload): Json<SchedulePayl
         _ => warn!("Unexpected POST payload {}", payload.schedule_type),
     }
 }
+
+async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Redirect {
+    let (redirect_url, csref_token) = yahoo(web_state.db_pool, web_state.client_id, web_state.client_secret, web_state.yahoo_callback).await;
+    web_state.csref_token = Some(csref_token);
+
+    Redirect::temporary(&redirect_url)
+}
+
+#[derive(Deserialize)]
+struct CodeResponse {
+    code: String,
+    state: String,
+}
+
+async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>) -> Response {
+    let token = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
+    println!("{:#?}", web_state.csref_token);
+
+    token.into_response()
+}
+

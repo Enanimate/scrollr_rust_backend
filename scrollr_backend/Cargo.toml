@@ -16,4 +16,5 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 finance_service = { path = "../finance_service" }
 sports_service = { path = "../sports_service" }
+yahoo_fantasy = { path = "../yahoo_fantasy" }
 utils = { path = "../utils" }

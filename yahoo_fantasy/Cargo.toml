@@ -1,0 +1,9 @@
+[package]
+name = "yahoo_fantasy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+oauth2 = "5.0"
+
+utils = { path = "../utils", features = ["fantasy"] }

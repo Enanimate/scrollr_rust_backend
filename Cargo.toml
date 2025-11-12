@@ -3,5 +3,6 @@ members = [
     "scrollr_backend",
     "finance_service",
     "utils",
-    "sports_service"
+    "sports_service",
+    "yahoo_fantasy"
 ]

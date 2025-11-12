@@ -20,7 +20,7 @@ impl Log for AsyncLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             let log_entry = format!(
-                "[{}] {} {} - {}",
+                "[{}] {} {} - {}\n",
                 chrono::Local::now(),
                 record.level(),
                 record.target(),
@@ -61,31 +61,43 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
 
     println!("Starting async log writer task...");
 
-    let mut sports_buffer = String::new();
+    /*let mut sports_buffer = String::new();
     let mut finance_buffer = String::new();
     let mut backend_buffer = String::new();
-    const LOG_BUFFER_FLUSH_SIZE: usize = 1;
+    const LOG_BUFFER_FLUSH_SIZE: usize = 1;*/
 
 
     while let Some(msg) = receiver.recv().await {
         println!("{msg}");
 
         if msg.contains("finance") {
-            finance_buffer.push_str(&msg);
-            finance_buffer.push('\n');
+            //finance_buffer.push_str(&msg);
+            //finance_buffer.push('\n');
+            if let Err(e) = finance.write_all(msg.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
+            //finance_buffer.clear();
         }
 
         if msg.contains("sports") {
-            sports_buffer.push_str(&msg);
-            sports_buffer.push('\n');
+            //sports_buffer.push_str(&msg);
+            //sports_buffer.push('\n');
+            if let Err(e) = sports.write_all(msg.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
+            //sports_buffer.clear();
         }
 
         if msg.contains("backend") {
-            backend_buffer.push_str(&msg);
-            backend_buffer.push('\n');
+            //backend_buffer.push_str(&msg);
+            //backend_buffer.push('\n');
+            if let Err(e) = backend.write_all(msg.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
+            //backend_buffer.clear();
         }
 
-        if finance_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
+        /*if finance_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
             if let Err(e) = finance.write_all(finance_buffer.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
@@ -104,7 +116,7 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
                 eprintln!("Error writing log data to disk: {}", e);
             }
             backend_buffer.clear();
-        }
+        }*/
     }
 
     println!("Log writer task finished.");
