@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use futures_util::future::join_all;
 use reqwest::Client;
-use tokio::time;
-use utils::{database::{PgPool, finance::{create_tables, insert_symbol, update_previous_close, update_trade}}, log::{debug, info, warn}};
+use tokio::time::{self, sleep};
+use utils::{database::{PgPool, finance::{create_tables, insert_symbol, update_previous_close, update_trade}}, log::{debug, error, info, warn}};
 
 use crate::{types::{FinanceState, QuoteResponse}, websocket::connect};
 
@@ -15,12 +15,19 @@ pub async fn start_finance_services(pool: Arc<PgPool>) {
     info!("Starting finance service...");
     // Initialization
     let state = FinanceState::new(Arc::clone(&pool));
-    info!("Creating sports tables...");
+    info!("Creating finance tables...");
     create_tables(pool.clone()).await;
     initialize_symbols(state.clone()).await;
     update_all_previous_closes(state.clone()).await;
 
-    connect(state.subscriptions, state.api_key, state.client, pool).await;
+    let should_reconnect = true;
+
+    while should_reconnect {
+        connect(state.subscriptions.clone(), state.api_key.clone(), state.client.clone(), pool.clone()).await;
+
+        error!("Lost websocket, attempting reconnect in 5 minutes...");
+        sleep(Duration::from_mins(5)).await;
+    }
 }
 
 /// Initializes a pre-selected set of Finnhub symbols

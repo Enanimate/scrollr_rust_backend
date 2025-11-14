@@ -1,6 +1,7 @@
 use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use axum::{Json, Router, extract::{Query, State}, response::{IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum::{Json, Router, extract::{Query, State}, http::StatusCode, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum_extra::extract::CookieJar;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
@@ -9,7 +10,7 @@ use serde::Deserialize;
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{exchange_for_token, start_fantasy_service, yahoo};
+use yahoo_fantasy::{api::get_user_leagues, exchange_for_token, start_fantasy_service, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -22,14 +23,13 @@ async fn main() {
         Err(e) => eprintln!("Failed to set logger: {}", e)
     }
 
+    let domain_name = env::var("DOMAIN_NAME").expect("Domain name needs to be specified in .env!");
+    let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
     let web_state = ServerState::new().await;
 
     handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone())));
     handles.push(tokio::spawn(start_sports_service(web_state.db_pool.clone())));
     handles.push(tokio::spawn(start_fantasy_service(web_state.db_pool.clone())));
-
-    let domain_name = env::var("DOMAIN_NAME").expect("Domain name needs to be specified in .env!");
-    let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
 
     let cache_dir = PathBuf::from("./acme_cache");
 
@@ -57,7 +57,7 @@ async fn main() {
         .route("/", post(handler))
         .route("/start", get(get_yahoo_handler))
         .route("/callback", get(yahoo_callback))
-        .route("/finance", get(|| async { "Hello, World!" }))
+        .route("/yahoo/leagues", get(user_leagues))
         .with_state(web_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
@@ -116,10 +116,49 @@ struct CodeResponse {
     state: String,
 }
 
-async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>) -> Response {
-    let token = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
-    println!("{:#?}", web_state.csref_token);
+async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>) -> Result<Html<String>, StatusCode> {
+    let access_token = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
 
-    token.into_response()
+    let html_content = format!(
+        r#"
+            <!doctype html><html><head><meta charset="utf-8"><title>Auth Complete</title></head>
+            <body style="font-family: ui-sans-serif, system-ui;">
+                <script>
+                (function() {{
+                    try {{
+                        if (window.opener) {{
+                            // POST MESSAGE: Sending the access token back to the main app window
+                            window.opener.postMessage({{ 
+                                type: 'yahoo-auth', 
+                                accessToken: {0} 
+                            }}, '*'); 
+                        }} else {{
+                            document.cookie = `yahoo-auth={0}; domain=enanimate.dev`;
+                        }}
+                    }} catch(e) {{
+                        console.error("Error sending token via postMessage:", e);
+                    }}
+                    // Always close the popup window after a brief delay
+                    setTimeout(function(){{ window.close(); }}, 100);
+                }})();
+                </script>
+                <p>Authentication successful. You can close this window.</p>
+            </body></html>
+        "#,
+        serde_json::to_string(&access_token).unwrap_or_else(|_| "\"error\"".to_string())
+    );
+
+    Ok(Html(html_content))
+}
+
+async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>) -> Response {
+    if let Some(access_token) = jar.get("yahoo-auth") {
+        let a = access_token.value_trimmed();
+        let data = get_user_leagues(web_state.client, a, "nfl").await;
+
+        Json(data).into_response()
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
+    }
 }
 
