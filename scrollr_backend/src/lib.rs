@@ -1,9 +1,11 @@
 use std::{env, sync::Arc};
 
+use axum::http::{HeaderMap, header::AUTHORIZATION};
+use axum_extra::extract::CookieJar;
 use finance_service::types::FinanceHealth;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use utils::database::{PgPool, initialize_pool};
+use utils::{database::{PgPool, initialize_pool}, log::warn};
 use yahoo_fantasy::api::Client;
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +37,34 @@ impl ServerState {
             client: Client::new(),
 
             finance_health: Arc::new(Mutex::new(FinanceHealth::new())),
+        }
+    }
+}
+
+pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<String> {
+    if let Some(auth_token) = headers.get(AUTHORIZATION) {
+        let access_token = auth_token
+            .to_str()
+            .inspect_err(|e| warn!("Access Token could not be cast as str: {e}"));
+
+        if let Ok(token) = access_token {
+            let fixed_token = if token.starts_with("Bearer ") {
+                token.strip_prefix("Bearer ").unwrap()
+            } else {
+                token
+            };
+
+            return Some(fixed_token.to_string());
+        } else {
+            return None;
+        }
+    } else {
+        if let Some(auth_cookie) = jar.get("yahoo-auth") {
+            let token = auth_cookie.value_trimmed();
+
+            return Some(token.to_string());
+        } else {
+            return None;
         }
     }
 }

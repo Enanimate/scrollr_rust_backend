@@ -7,7 +7,8 @@ const AUTH_URL: &str = "https://api.login.yahoo.com/oauth2/request_auth";
 const TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
 
 pub mod api;
-mod xml_types;
+mod xml_leagues;
+mod xml_standings;
 pub mod types;
 
 pub async fn start_fantasy_service(pool: Arc<PgPool>) {

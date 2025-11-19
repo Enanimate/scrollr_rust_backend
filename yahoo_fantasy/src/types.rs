@@ -18,3 +18,19 @@ pub struct UserLeague {
     pub season: u16,
     pub game_code: String
 }
+
+#[derive(Serialize, Debug)]
+pub struct LeagueStandings {
+    pub team_key: String,
+    pub team_id: u8,
+    pub name: String,
+    pub url: String,
+    pub team_logo: String,
+    pub wins: u8,
+    pub losses: u8,
+    pub ties: u8,
+    pub percentage: String,
+    pub games_back: f32,
+    pub points_for: f32,
+    pub points_against: f32,
+}

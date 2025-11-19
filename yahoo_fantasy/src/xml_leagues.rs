@@ -1,7 +1,6 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-
 pub struct FantasyContent {
     pub users: Users,
 }
