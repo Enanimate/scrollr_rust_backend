@@ -116,10 +116,28 @@ impl Serialize for Stat {
     where
         S: serde::Serializer
     {
+        let formatted_name = {
+            let name = format!("{:?}", self.stat_name);
+            let mut result = String::new();
+            let mut chars = name.chars().peekable();
+
+            while let Some(c) = chars.next() {
+                if c.is_uppercase() && result.len() > 0 {
+                    if let Some(last_char) = result.chars().last() {
+                        if last_char.is_lowercase() {
+                            result.push(' ');
+                        }
+                    }
+                }
+                result.push(c);
+            }
+            result.trim().to_string()
+        };
+
         let mut state = serializer.serialize_struct("Stat", 2)?;
 
-        let name_string = format!("{:?}", self.stat_name);
-        state.serialize_field("name", &name_string)?;
+        
+        state.serialize_field("name", &formatted_name.to_lowercase())?;
 
         state.serialize_field("value", &self.value)?;
 

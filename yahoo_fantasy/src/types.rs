@@ -28,16 +28,16 @@ pub enum Stats {
     FumblesLost, // ID 18
     
     // Kicking Stats (K)
-    FieldGoalsZerotoNineteenMade, // ID 19
-    FieldGoalsTwentytoTwentyNineMade, // ID 20
-    FieldGoalsThirtytoThirtyNineMade, // ID 21
-    FieldGoalsFortytoFortyNineMade, // ID 22
-    FieldGoalsFiftyPlusMade, // ID 23
-    FieldGoalsMissedZerotoNineteen, // ID 24
-    FieldGoalsMissedTwentytoTwentyNine, // ID 25
-    FieldGoalsMissedThirtytoThirtyNine, // ID 26
-    FieldGoalsMissedFortytoFortyNine, // ID 27
-    FieldGoalsMissedFiftyPlus, // ID 28
+    FieldGoals0to19Made, // ID 19
+    FieldGoals20to29Made, // ID 20
+    FieldGoals30to39Made, // ID 21
+    FieldGoals40to49Made, // ID 22
+    FieldGoals50PlusMade, // ID 23
+    FieldGoalsMissed0to19, // ID 24
+    FieldGoalsMissed20to29, // ID 25
+    FieldGoalsMissed30to39, // ID 26
+    FieldGoalsMissed40to49, // ID 27
+    FieldGoalsMissed50Plus, // ID 28
     PointAfterAttemptMade, // ID 29
     PointAfterAttemptMissed, // ID 30
     
@@ -130,18 +130,18 @@ impl TryFrom<u8> for Stats {
             16 => Ok(Self::TwoPointConversions),
             17 => Ok(Self::Fumbles),
             18 => Ok(Self::FumblesLost),
-            19 => Ok(Self::FieldGoalsZerotoNineteenMade),
+            19 => Ok(Self::FieldGoals0to19Made),
             
-            20 => Ok(Self::FieldGoalsTwentytoTwentyNineMade),
-            21 => Ok(Self::FieldGoalsThirtytoThirtyNineMade),
-            22 => Ok(Self::FieldGoalsFortytoFortyNineMade),
-            23 => Ok(Self::FieldGoalsFiftyPlusMade),
-            24 => Ok(Self::FieldGoalsMissedZerotoNineteen),
+            20 => Ok(Self::FieldGoals20to29Made),
+            21 => Ok(Self::FieldGoals30to39Made),
+            22 => Ok(Self::FieldGoals40to49Made),
+            23 => Ok(Self::FieldGoals50PlusMade),
+            24 => Ok(Self::FieldGoalsMissed0to19),
 
-            25 => Ok(Self::FieldGoalsMissedTwentytoTwentyNine),
-            26 => Ok(Self::FieldGoalsMissedThirtytoThirtyNine),
-            27 => Ok(Self::FieldGoalsMissedFortytoFortyNine),
-            28 => Ok(Self::FieldGoalsMissedFiftyPlus),
+            25 => Ok(Self::FieldGoalsMissed20to29),
+            26 => Ok(Self::FieldGoalsMissed30to39),
+            27 => Ok(Self::FieldGoalsMissed40to49),
+            28 => Ok(Self::FieldGoalsMissed50Plus),
             29 => Ok(Self::PointAfterAttemptMade),
 
             30 => Ok(Self::PointAfterAttemptMissed),
