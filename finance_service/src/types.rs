@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, fs, pin::Pin, sync::Arc, time::{Duration, Instant}};
 
 use reqwest::{Client, header::{HeaderMap, HeaderValue}};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::Sleep;
 use utils::database::PgPool;
 
@@ -89,6 +89,32 @@ impl FinanceState {
             subscriptions,
             client: Arc::new(client),
             pool,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct FinanceHealth {
+    pub status: String,
+    pub batch_number: u64,
+}
+
+impl FinanceHealth {
+    pub fn new() -> Self {
+        Self {
+            status: String::from("healthy"),
+            batch_number: 0,
+        }
+    }
+
+    pub(crate) fn set_batch(&mut self, number: u64) {
+        self.batch_number = number
+    }
+
+    pub fn get_health(&self) -> Self {
+        Self {
+            status: self.status.clone(),
+            batch_number: self.batch_number,
         }
     }
 }

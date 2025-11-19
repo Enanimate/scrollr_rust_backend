@@ -1,12 +1,12 @@
 use std::{collections::HashMap, future::pending, sync::{Arc, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 
 use reqwest::Client;
-use tokio::{net::TcpStream, time, sync::RwLock};
+use tokio::{net::TcpStream, sync::{Mutex, RwLock}, time};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message};
 use futures_util::{SinkExt, StreamExt, stream::{self, SplitSink, SplitStream, iter}};
 use utils::{database::{PgPool, finance::{DatabaseTradeData, Utc, get_trades, insert_symbol, update_previous_close, update_trade}}, log::{error, info, warn}};
 
-use crate::{get_quote, types::{TradeData, TradeUpdate, WebSocketState}};
+use crate::{get_quote, types::{FinanceHealth, TradeData, TradeUpdate, WebSocketState}};
 
 const UPDATE_BATCH_SIZE: usize = 10;
 const UPDATE_BATCH_TIMEOUT: u64 = 1000;
@@ -14,7 +14,7 @@ const UPDATE_BATCH_SIZE_DELAY: u64 = 500;
 
 const LOG_THROTTLE_INTERVAL: Duration = Duration::from_secs(5);
 
-pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, client: Arc<Client>, pool: Arc<PgPool>) {
+pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, client: Arc<Client>, pool: Arc<PgPool>, health_state: Arc<Mutex<FinanceHealth>>) {
     let state = Arc::new(RwLock::new(WebSocketState::new()));
     let url = format!("wss://ws.finnhub.io/?token={}", api_key);
 
@@ -24,7 +24,7 @@ pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, client:
     let (writer, reader) = ws_stream.split();
 
     tokio::spawn(ws_send(writer, subscriptions));
-    ws_read(reader, Arc::clone(&state), client, pool).await;
+    ws_read(reader, Arc::clone(&state), client, pool, health_state.clone()).await;
 }
 
 async fn ws_send(mut writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>, subscriptions: Vec<String>) {
@@ -38,7 +38,7 @@ async fn ws_send(mut writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>
     writer.send_all(&mut stream).await.unwrap();
 }
 
-async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>, state: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>) {
+async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>, state: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>, health_state: Arc<Mutex<FinanceHealth>>) {
     println!("Now listening for messages...");
     
     loop {
@@ -60,7 +60,7 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
                     let state_clone = Arc::clone(&state);
 
                     drop(state_w);
-                    tokio::spawn(process_batch(state_clone, client.clone(), pool.clone()));
+                    tokio::spawn(process_batch(state_clone, client.clone(), pool.clone(), health_state.clone()));
                 } else {
                     info!("Timer fired, but a batch is already in process. Waiting.")
                 }
@@ -108,7 +108,7 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
 
     if !state.read().await.update_queue.is_empty() {
         info!("Processing final batch before exit...");
-        process_batch(state, client, pool).await;
+        process_batch(state, client, pool, health_state).await;
     }
 }
 
@@ -158,7 +158,7 @@ async fn schedule_batch_processing(state_arc: &Arc<RwLock<WebSocketState>>) {
     }
 }
 
-async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>) {
+async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>, health_state: Arc<Mutex<FinanceHealth>>) {
     let (trades, batch_num) = {
         let mut state = state_arc.write().await;
 
@@ -230,6 +230,10 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
                 now.duration_since(last) >= LOG_THROTTLE_INTERVAL
             });
 
+            let mut health = health_state.lock().await;
+            health.set_batch(batch_num);
+            drop(health);
+            
             if should_log {
                 state.last_log_time = Some(now);
                 info!("Batch #{} complete: {} processed, {} errors",

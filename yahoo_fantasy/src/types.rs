@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct UserLeague {
     pub league_key: String,
     pub league_id: u32,

@@ -1,6 +1,6 @@
 use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
 
-use axum::{Json, Router, extract::{Query, State}, http::StatusCode, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum::{Json, Router, extract::{Query, State}, http::{HeaderMap, StatusCode, header::AUTHORIZATION}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::CookieJar;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
@@ -27,7 +27,7 @@ async fn main() {
     let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
     let web_state = ServerState::new().await;
 
-    handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone())));
+    handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone(), Arc::clone(&web_state.finance_health))));
     handles.push(tokio::spawn(start_sports_service(web_state.db_pool.clone())));
     handles.push(tokio::spawn(start_fantasy_service(web_state.db_pool.clone())));
 
@@ -55,12 +55,15 @@ async fn main() {
 
     let app = Router::new()
         .route("/", post(handler))
-        .route("/start", get(get_yahoo_handler))
+        .route("/yahoo/start", get(get_yahoo_handler))
         .route("/callback", get(yahoo_callback))
         .route("/yahoo/leagues", get(user_leagues))
+        .route("/finance/health", get(finance_health))
         .with_state(web_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
+
+    info!("Listening on address: {addr}");
 
     axum_server::bind(addr)
         .acceptor(acceptor)
@@ -104,7 +107,12 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
 }
 
 async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Redirect {
-    let (redirect_url, csref_token) = yahoo(web_state.db_pool, web_state.client_id, web_state.client_secret, web_state.yahoo_callback).await;
+    info!("Requested!");
+    let result = yahoo(web_state.db_pool, web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
+        .await
+        .inspect_err(|e| error!("Yahoo Error: {e}"));
+
+    let (redirect_url, csref_token) = result.unwrap();
     web_state.csref_token = Some(csref_token);
 
     Redirect::temporary(&redirect_url)
@@ -151,14 +159,39 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
     Ok(Html(html_content))
 }
 
-async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>) -> Response {
-    if let Some(access_token) = jar.get("yahoo-auth") {
-        let a = access_token.value_trimmed();
-        let data = get_user_leagues(web_state.client, a, "nfl").await;
+async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+    if let Some(auth_token) = headers.get(AUTHORIZATION) {
+        let access_token = auth_token
+            .to_str()
+            .inspect_err(|e| warn!("Access Token could not be cast as str: {e}"));
 
-        Json(data).into_response()
+        if let Ok(token) = access_token {
+            let fixed_token = if token.starts_with("Bearer ") {
+                token.strip_prefix("Bearer ").unwrap()
+            } else {
+                token
+            };
+
+            let data = get_user_leagues(web_state.client, fixed_token, "nfl").await;
+
+            return Json(data).into_response();
+        } else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     } else {
-        StatusCode::UNAUTHORIZED.into_response()
+        if let Some(auth_cookie) = jar.get("yahoo-auth") {
+            let token = auth_cookie.value_trimmed();
+
+            let data = get_user_leagues(web_state.client, token, "nfl").await;
+            return Json(data).into_response();
+        } else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
     }
 }
 
+async fn finance_health(State(web_state): State<ServerState>) -> Response {
+    let health = web_state.finance_health.lock().await.get_health();
+
+    Json(health).into_response()
+}

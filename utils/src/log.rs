@@ -51,6 +51,14 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
         }
     };
 
+    let mut fantasy = match File::create(format!("{log_file_path}/fantasy.log")) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Fatal: Could not create log file at {:?}: {}", "fantasy.log", e);
+            return;
+        }
+    };
+
     let mut backend = match File::create(format!("{log_file_path}/backend.log")) {
         Ok(f) => f,
         Err(e) => {
@@ -61,62 +69,32 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
 
     println!("Starting async log writer task...");
 
-    /*let mut sports_buffer = String::new();
-    let mut finance_buffer = String::new();
-    let mut backend_buffer = String::new();
-    const LOG_BUFFER_FLUSH_SIZE: usize = 1;*/
-
-
     while let Some(msg) = receiver.recv().await {
         println!("{msg}");
 
         if msg.contains("finance") {
-            //finance_buffer.push_str(&msg);
-            //finance_buffer.push('\n');
             if let Err(e) = finance.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
-            //finance_buffer.clear();
         }
 
         if msg.contains("sports") {
-            //sports_buffer.push_str(&msg);
-            //sports_buffer.push('\n');
             if let Err(e) = sports.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
-            //sports_buffer.clear();
+        }
+
+        if msg.contains("fantasy") {
+            if let Err(e) = fantasy.write_all(msg.as_bytes()) {
+                eprintln!("Error writing log data to disk: {}", e);
+            }
         }
 
         if msg.contains("backend") {
-            //backend_buffer.push_str(&msg);
-            //backend_buffer.push('\n');
             if let Err(e) = backend.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
-            //backend_buffer.clear();
         }
-
-        /*if finance_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
-            if let Err(e) = finance.write_all(finance_buffer.as_bytes()) {
-                eprintln!("Error writing log data to disk: {}", e);
-            }
-            finance_buffer.clear();
-        }
-
-        if sports_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
-            if let Err(e) = sports.write_all(sports_buffer.as_bytes()) {
-                eprintln!("Error writing log data to disk: {}", e);
-            }
-            sports_buffer.clear();
-        }
-
-        if backend_buffer.len() > LOG_BUFFER_FLUSH_SIZE {
-            if let Err(e) = backend.write_all(backend_buffer.as_bytes()) {
-                eprintln!("Error writing log data to disk: {}", e);
-            }
-            backend_buffer.clear();
-        }*/
     }
 
     println!("Log writer task finished.");

@@ -21,8 +21,16 @@ async fn make_request(endpoint: &str, client: Client, token: &str) -> Option<Str
 }
 
 pub async fn get_user_leagues(client: Client, token: &str, game_key: &str) -> Vec<UserLeague> {
-    let data = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, token).await;
-    let cleaned: FantasyContent = serde_xml_rs::from_str(&data.unwrap()).unwrap();
+    let response = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, token).await;
+    if response.is_none() { return Vec::new() };
+
+    let league_data = response.unwrap();
+
+    if league_data.contains("token_rejected") {
+        panic!("PLEASE HANDLE TOKEN REFRESH");
+    }
+
+    let cleaned: FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
 
     let mut leagues = Vec::new();
 
