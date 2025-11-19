@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+pub struct StatCode {
+    pub name: String,
+    pub value: u32,
+}
 
 #[derive(Serialize, Debug)]
 pub struct UserLeague {
@@ -33,4 +37,33 @@ pub struct LeagueStandings {
     pub games_back: f32,
     pub points_for: f32,
     pub points_against: f32,
+}
+
+#[derive(Serialize, Debug)]
+pub struct Roster {
+    pub id: u32,
+    pub key: String,
+    pub name: String,
+    #[serde(rename="firstName")]
+    pub first_name: String,
+    #[serde(rename="lastName")]
+    pub last_name: String,
+    #[serde(rename="teamAbbr")]
+    pub team_abbreviation: String,
+    #[serde(rename="teamFullName")]
+    pub team_full_name: String,
+    #[serde(rename="uniformNumber")]
+    pub uniform_number: String,
+    pub position: String,
+    #[serde(rename="selectedPosition")]
+    pub selected_position: String,
+    #[serde(rename="eligiblePositions")]
+    pub eligible_positions: Vec<String>,
+    #[serde(rename="imageUrl")]
+    pub image_url: String,
+    pub headshot: String,
+    #[serde(rename="isUndroppable")]
+    pub is_undroppable: bool,
+    #[serde(rename="positionType")]
+    pub position_type: String,
 }

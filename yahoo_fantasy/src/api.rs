@@ -1,7 +1,7 @@
 pub use oauth2::{http::header, reqwest::Client};
 use utils::log::error;
 
-use crate::{types::{LeagueStandings, UserLeague}, xml_leagues, xml_standings};
+use crate::{types::{LeagueStandings, Roster, UserLeague}, xml_leagues, xml_roster, xml_standings};
 
 const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -70,7 +70,7 @@ pub async fn get_league_standings(league_key: String, client: Client, token: Str
         panic!("PLEASE HANDLE TOKEN REFRESH");
     }
 
-    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data).expect("?");
+    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
 
     let mut standings = Vec::new();
 
@@ -102,4 +102,53 @@ pub async fn get_league_standings(league_key: String, client: Client, token: Str
     }
 
     return standings;
+}
+
+pub async fn get_team_roster(team_key: String, client: Client, token: String, opt_date: Option<String>) -> Vec<Roster> {
+    let url = if let Some(date) = opt_date {
+        format!("/team/{team_key}/roster;date={date}/players/stats")
+    } else {
+        format!("/team/{team_key}/roster/players/stats")
+    };
+
+    let response = make_request(&url, client, &token).await;
+
+    if response.is_none() { return Vec::new() };
+
+    let league_data = response.unwrap();
+
+    if league_data.contains("token_expired") {
+        panic!("PLEASE HANDLE TOKEN REFRESH");
+    }
+
+    let cleaned: xml_roster::FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
+
+    let mut roster = Vec::new();
+
+    let team = cleaned.team;
+    let players = team.roster.players.player;
+    for player in players {
+        let eligible = player.eligible_positions.position;
+        let model = Roster {
+            id: player.player_id,
+            key: player.player_key,
+            name: player.name.full,
+            first_name: player.name.first,
+            last_name: player.name.last,
+            team_abbreviation: player.editorial_team_abbr,
+            team_full_name: player.editorial_team_full_name,
+            uniform_number: player.uniform_number.unwrap_or("None".to_string()),
+            position: player.display_position,
+            selected_position: player.selected_position.position,
+            eligible_positions: eligible,
+            image_url: player.image_url,
+            headshot: player.headshot.url,
+            is_undroppable: player.is_undroppable,
+            position_type: player.position_type,
+        };
+
+        roster.push(model);
+    }
+
+    return roster;
 }

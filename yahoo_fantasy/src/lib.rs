@@ -3,12 +3,14 @@ use std::{error::Error, str::FromStr, sync::Arc};
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::Client};
 use utils::database::{PgPool, fantasy::{Uuid, create_tables, insert_csrf}};
 
+
 const AUTH_URL: &str = "https://api.login.yahoo.com/oauth2/request_auth";
 const TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
 
 pub mod api;
 mod xml_leagues;
 mod xml_standings;
+mod xml_roster;
 pub mod types;
 
 pub async fn start_fantasy_service(pool: Arc<PgPool>) {

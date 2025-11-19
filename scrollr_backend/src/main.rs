@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_user_leagues}, exchange_for_token, start_fantasy_service, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -60,6 +60,7 @@ async fn main() {
         .route("/yahoo/leagues", get(user_leagues))
         .route("/finance/health", get(finance_health))
         .route("/yahoo/league/{league_key}/standings", get(league_standings))
+        .route("/yahoo/team/{teamKey}/roster", get(team_roster))
         .with_state(web_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
@@ -200,6 +201,17 @@ async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(
     let standings = get_league_standings(league_key, web_state.client, token).await;
 
     Json(standings).into_response()
+}
+
+async fn team_roster(Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+    let token_option = get_access_token(jar, headers);
+    if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
+
+    let token = token_option.unwrap();
+
+    let roster = get_team_roster(team_key, web_state.client, token, None).await;
+
+    Json(roster).into_response()
 }
 
 async fn finance_health(State(web_state): State<ServerState>) -> Response {
