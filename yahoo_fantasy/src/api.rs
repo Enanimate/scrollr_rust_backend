@@ -148,6 +148,7 @@ pub async fn get_team_roster(team_key: String, client: Client, token: String, op
             is_undroppable: player.is_undroppable,
             position_type: player.position_type,
             stats: stats,
+            player_points: player.player_points,
         };
 
         roster.push(model);

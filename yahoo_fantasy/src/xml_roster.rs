@@ -39,6 +39,7 @@ pub struct Player {
     pub is_undroppable: bool,
     pub position_type: String,
     pub player_stats: PlayerStats,
+    pub player_points: PlayerPoints,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +62,13 @@ pub struct SelectedPosition {
 #[derive(Debug, Deserialize)]
 pub struct Headshot {
     pub url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PlayerPoints {
+    pub coverage_type: String,
+    pub week: u8,
+    pub total: f32,
 }
 
 #[derive(Debug, Deserialize)]

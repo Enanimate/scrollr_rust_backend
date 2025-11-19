@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::xml_roster;
+use crate::xml_roster::{self, PlayerPoints};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Stats {
@@ -269,5 +269,7 @@ pub struct Roster {
     pub is_undroppable: bool,
     #[serde(rename="positionType")]
     pub position_type: String,
-    pub stats: Vec<xml_roster::Stat>
+    pub stats: Vec<xml_roster::Stat>,
+    #[serde(rename="playerPoints")]
+    pub player_points: PlayerPoints,
 }
