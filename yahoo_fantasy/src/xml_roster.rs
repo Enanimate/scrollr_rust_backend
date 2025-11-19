@@ -1,4 +1,6 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de, ser::SerializeStruct};
+
+use crate::types;
 
 #[derive(Debug, Deserialize)]
 pub struct FantasyContent {
@@ -36,6 +38,7 @@ pub struct Player {
     pub headshot: Headshot,
     pub is_undroppable: bool,
     pub position_type: String,
+    pub player_stats: PlayerStats,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,4 +61,60 @@ pub struct SelectedPosition {
 #[derive(Debug, Deserialize)]
 pub struct Headshot {
     pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlayerStats {
+    pub stats: Stats,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Stats {
+    pub stat: Vec<Stat>
+}
+
+#[derive(Debug)]
+pub struct Stat {
+    pub stat_name: types::Stats,
+    value: u32,
+}
+
+impl<'de> Deserialize<'de> for Stat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> 
+    {
+        #[derive(Deserialize)]
+        struct StatXml {
+            #[serde(rename = "stat_id")]
+            raw_id: u8,
+            value: u32,
+        }
+
+        let temp = StatXml::deserialize(deserializer)?;
+
+        let stats_enum = types::Stats::try_from(temp.raw_id)
+            .map_err(de::Error::custom)?;
+
+        Ok(Stat {
+            stat_name: stats_enum,
+            value: temp.value,
+        })
+    }
+}
+
+impl Serialize for Stat {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer
+    {
+        let mut state = serializer.serialize_struct("Stat", 2)?;
+
+        let name_string = format!("{:?}", self.stat_name);
+        state.serialize_field("name", &name_string)?;
+
+        state.serialize_field("value", &self.value)?;
+
+        state.end()
+    }
 }

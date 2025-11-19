@@ -129,6 +129,8 @@ pub async fn get_team_roster(team_key: String, client: Client, token: String, op
     let players = team.roster.players.player;
     for player in players {
         let eligible = player.eligible_positions.position;
+        let stats = player.player_stats.stats.stat;
+
         let model = Roster {
             id: player.player_id,
             key: player.player_key,
@@ -145,6 +147,7 @@ pub async fn get_team_roster(team_key: String, client: Client, token: String, op
             headshot: player.headshot.url,
             is_undroppable: player.is_undroppable,
             position_type: player.position_type,
+            stats: stats,
         };
 
         roster.push(model);
