@@ -1,16 +1,17 @@
-use std::{env, fs::{self}, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc};
 
-use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, StatusCode, header::AUTHORIZATION}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::CookieJar;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
-use scrollr_backend::{SchedulePayload, ServerState, get_access_token};
-use serde::Deserialize;
+use scrollr_backend::{ErrorCodeResponse, SchedulePayload, ServerState, get_access_token};
+use serde::{Deserialize, Serialize};
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
+use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, types::{LeagueStandings, UserLeague}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -55,15 +56,24 @@ async fn main() {
 
     let app = Router::new()
         .route("/", post(handler))
-        .route("/yahoo/start", get(get_yahoo_handler))
-        .route("/callback", get(yahoo_callback))
-        .route("/yahoo/leagues", get(user_leagues))
         .route("/finance/health", get(finance_health))
+        .route("/yahoo/start", get(get_yahoo_handler))
+        .route("/yahoo/callback", get(yahoo_callback))
+        .route("/yahoo/leagues", get(user_leagues))
         .route("/yahoo/league/{league_key}/standings", get(league_standings))
         .route("/yahoo/team/{teamKey}/roster", get(team_roster))
+        .route("/health", get(|| async { "Hello, World!" }))
+        .layer(
+            SetRequestHeaderLayer::if_not_present(
+                header::HeaderName::from_static("x-frame-options"),
+                HeaderValue::from_static("DENY")
+            )
+        )
         .with_state(web_state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
+    let ipv4_addr = Ipv4Addr::from([0, 0, 0, 0]);
+
+    let addr = SocketAddr::new(IpAddr::V4(ipv4_addr), 8443);
 
     info!("Listening on address: {addr}");
 
@@ -108,8 +118,8 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
     }
 }
 
-async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Redirect {
-    info!("Requested!");
+async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Response {
+    info!("start!");
     let result = yahoo(web_state.db_pool, web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
         .await
         .inspect_err(|e| error!("Yahoo Error: {e}"));
@@ -117,7 +127,14 @@ async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Redirect
     let (redirect_url, csref_token) = result.unwrap();
     web_state.csref_token = Some(csref_token);
 
-    Redirect::temporary(&redirect_url)
+    let mut response = Redirect::temporary(&redirect_url).into_response();
+
+    response.headers_mut().insert(
+        REFERRER_POLICY, 
+        HeaderValue::from_static("no-referrer")
+    );
+
+    response
 }
 
 #[derive(Deserialize)]
@@ -127,7 +144,14 @@ struct CodeResponse {
 }
 
 async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>) -> Result<Html<String>, StatusCode> {
-    let access_token = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
+    info!("{}", web_state.yahoo_callback);
+    let tokens = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
+    let access_token = tokens.access_token;
+    let refresh_token = if let Some(token) = tokens.refresh_token {
+        token
+    } else {
+        String::new()
+    };
 
     let html_content = format!(
         r#"
@@ -140,10 +164,12 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
                             // POST MESSAGE: Sending the access token back to the main app window
                             window.opener.postMessage({{ 
                                 type: 'yahoo-auth', 
-                                accessToken: {0} 
+                                accessToken: {0},
+                                refreshToken: {1}
                             }}, '*'); 
                         }} else {{
-                            document.cookie = `yahoo-auth={0}; domain=enanimate.dev`;
+                            document.cookie = `yahoo-auth={0}; domain=enanimate.dev; Secure;`;
+                            document.cookie = `yahoo-refresh={1}; domain=enanimate.dev; Secure;`;
                         }}
                     }} catch(e) {{
                         console.error("Error sending token via postMessage:", e);
@@ -155,67 +181,94 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
                 <p>Authentication successful. You can close this window.</p>
             </body></html>
         "#,
-        serde_json::to_string(&access_token).unwrap_or_else(|_| "\"error\"".to_string())
+        serde_json::to_string(&access_token).unwrap_or_else(|_| "\"error\"".to_string()),
+        serde_json::to_string(&refresh_token).unwrap_or_else(|_| "\"error\"".to_string()),
     );
 
     Ok(Html(html_content))
 }
 
 async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
-    if let Some(auth_token) = headers.get(AUTHORIZATION) {
-        let access_token = auth_token
-            .to_str()
-            .inspect_err(|e| warn!("Access Token could not be cast as str: {e}"));
+    info!("start leagues!");
+    let token_option = get_access_token(jar, headers);
 
-        if let Ok(token) = access_token {
-            let fixed_token = if token.starts_with("Bearer ") {
-                token.strip_prefix("Bearer ").unwrap()
-            } else {
-                token
-            };
+    if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
-            let data = get_user_leagues(web_state.client, fixed_token, "nfl").await;
+    let tokens = token_option.unwrap();
+    let leagues_result = get_user_leagues(web_state.client, tokens.access_token, "nfl", tokens.refresh_token).await;
 
-            return Json(data).into_response();
-        } else {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    } else {
-        if let Some(auth_cookie) = jar.get("yahoo-auth") {
-            let token = auth_cookie.value_trimmed();
+    #[derive(Serialize)]
+    struct Leagues {
+        leagues: Vec<UserLeague>,
+    }
 
-            let data = get_user_leagues(web_state.client, token, "nfl").await;
-            return Json(data).into_response();
-        } else {
-            return StatusCode::UNAUTHORIZED.into_response();
+    info!("end leagues");
+    match leagues_result {
+        Ok(leagues) => Json(Leagues { leagues }).into_response(),
+        Err(e) => {
+            error!("Error fetching leagues for user: {e}");
+            ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch leagues: {e}").as_str())
         }
     }
 }
 
 async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+    info!("start standings!");
     let token_option = get_access_token(jar, headers);
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
-    let token = token_option.unwrap();
+    let tokens = token_option.unwrap();
 
-    let standings = get_league_standings(league_key, web_state.client, token).await;
+    let standings_result = get_league_standings(&league_key, web_state.client, tokens.access_token, tokens.refresh_token).await;
 
-    Json(standings).into_response()
+    #[derive(Serialize)]
+    struct Standings {
+        standings: Vec<LeagueStandings>,
+    }
+
+    info!("end standings!");
+    match standings_result {
+        Ok(standings) => Json(Standings { standings }).into_response(),
+        Err(e) => {
+            error!("Error fetching standings for {league_key}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
-async fn team_roster(Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+#[derive(Deserialize)]
+struct RosterDate {
+    date: Option<String>,
+}
+
+async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+    info!("start roster! {team_key} {:?}", date.date);
     let token_option = get_access_token(jar, headers);
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
-    let token = token_option.unwrap();
+    let tokens = token_option.unwrap();
 
-    let roster = get_team_roster(team_key, web_state.client, token, None).await;
+    let roster_result = get_team_roster(&team_key, web_state.client, tokens.access_token, date.date.clone(), tokens.refresh_token).await;
 
-    Json(roster).into_response()
+    #[derive(Serialize)]
+    struct Roster {
+        roster: Vec<yahoo_fantasy::types::Roster>,
+    }
+
+    info!("end roster! {team_key} {:?}", date.date);
+    match roster_result {
+        Ok(roster) => Json(Roster { roster }).into_response(),
+        Err(e) => {
+            error!("Error fetching roster for {team_key}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+
+    
 }
 
 async fn finance_health(State(web_state): State<ServerState>) -> Response {
     let health = web_state.finance_health.lock().await.get_health();
 
-    Json(health).into_response()
+    return Json(health).into_response();
 }

@@ -8,8 +8,7 @@ pub use sqlx::{PgPool, query, types::Uuid};
 pub async fn create_tables(pool: Arc<PgPool>) {
     let statement = "
         CREATE TABLE IF NOT EXISTS internal.fantasy_userdata (
-            user_id UUID PRIMARY KEY UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-            csrf TEXT DEFAULT NULL,
+            csrf TEXT NOT NULL,
             access_token TEXT DEFAULT NULL,
             refresh_token TEXT DEFAULT NULL,
             last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -29,11 +28,11 @@ pub async fn create_tables(pool: Arc<PgPool>) {
     }
 }
 
-pub async fn insert_csrf(pool: Arc<PgPool>, csrf: String, user_id: Uuid) {
+pub async fn insert_csrf(pool: Arc<PgPool>, csrf: String) {
     let statement = "
-        UPDATE internal.fantasy_userdata
-        SET csrf = $1
-        WHERE user_id = $2
+        INSERT INTO internal.fantasy_userdata (csrf)
+            VALUES ($1)
+        ON CONFLICT (csrf) DO NOTHING
     ";
 
     let conn = pool.acquire().await;
@@ -41,7 +40,6 @@ pub async fn insert_csrf(pool: Arc<PgPool>, csrf: String, user_id: Uuid) {
     if let Ok(mut connection) = conn {
         let _ = query(statement)
             .bind(csrf)
-            .bind(user_id)
             .execute(&mut *connection)
             .await
             .inspect_err(|e| error!("Execution Error: {}", e));
@@ -50,7 +48,7 @@ pub async fn insert_csrf(pool: Arc<PgPool>, csrf: String, user_id: Uuid) {
     }
 }
 
-pub async fn update_tokens(pool: Arc<PgPool>, access_token: AccessToken, refresh_token: RefreshToken, user_id: Uuid) {
+async fn _update_tokens(pool: Arc<PgPool>, access_token: AccessToken, refresh_token: RefreshToken, csrf: String) {
 
     let key = env::var("ENCRYPTION_KEY").unwrap();
     let mc = new_magic_crypt!(&key, 256);
@@ -62,7 +60,7 @@ pub async fn update_tokens(pool: Arc<PgPool>, access_token: AccessToken, refresh
         UPDATE internal.fantasy_userdata
         SET access_token = $1,
             refresh_token = $2
-        WHERE user_id = $3
+        WHERE csrf = $3
     ";
 
     let conn = pool.acquire().await;
@@ -71,7 +69,7 @@ pub async fn update_tokens(pool: Arc<PgPool>, access_token: AccessToken, refresh
         let _ = query(statement)
             .bind(encrypted_access_token)
             .bind(encrypted_refresh_token)
-            .bind(user_id)
+            .bind(csrf)
             .execute(&mut *connection)
             .await
             .inspect_err(|e| error!("Execution Error: {}", e));

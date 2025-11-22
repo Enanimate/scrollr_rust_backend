@@ -2,6 +2,11 @@ use serde::Serialize;
 
 use crate::xml_roster::{self, PlayerPoints};
 
+pub struct Tokens {
+    pub access_token: String,
+    pub refresh_token: Option<String>
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Stats {
 // General Stats (O, DP, K, DT)

@@ -2142,6 +2142,7 @@ dependencies = [
  "sports_service",
  "tokio",
  "tokio-rustls-acme",
+ "tower-http",
  "utils",
  "yahoo_fantasy",
 ]
@@ -3529,6 +3530,7 @@ checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
 name = "yahoo_fantasy"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "oauth2",
  "quick-xml",
  "serde",

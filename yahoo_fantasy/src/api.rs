@@ -1,36 +1,41 @@
+use anyhow::{Context, anyhow};
 pub use oauth2::{http::header, reqwest::Client};
-use utils::log::error;
+use utils::log::warn;
 
-use crate::{types::{LeagueStandings, Roster, UserLeague}, xml_leagues, xml_roster, xml_standings};
+use crate::{error::YahooError, types::{LeagueStandings, Roster, UserLeague}, xml_leagues, xml_roster, xml_standings};
 
-const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
+pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
-async fn make_request(endpoint: &str, client: Client, token: &str) -> Option<String> {
-    let response = client.get(format!("{YAHOO_BASE_API}{endpoint}"))
-        .bearer_auth(token)
-        .header(header::ACCEPT, "application/xml")
-        .send()
-        .await
-        .inspect_err(|e| error!("Reqwest Error: {e}"));
+pub(crate) async fn make_request(endpoint: &str, client: Client, access_token: &str, refresh_token: Option<String>, mut retries_allowed: u8) -> anyhow::Result<String> {
 
-    if let Ok(data) = response {
-        return data.text().await.ok();
-    } else {
-        return None;
+    while retries_allowed > 0 {
+        let url = format!("{YAHOO_BASE_API}{endpoint}");
+        let response = client.get(&url)
+            .bearer_auth(access_token)
+            .header(header::ACCEPT, "application/xml")
+            .send()
+            .await
+            .with_context(|| format!("Failed to make request to {url}"))?
+            .text()
+            .await
+            .with_context(|| format!("Failed casting response to text: {url}"))?;
+
+        //let status = YahooError::check_response(response, client).await;
+        let status = YahooError::Ok;
+        retries_allowed -= 1;
+        match status() {
+            YahooError::Ok() => return Ok(response),
+            YahooError::Error(e) => warn!("{e}"),
+        }
     }
+
+    Err(anyhow!("Exceeded number of retries allowed"))
 }
 
-pub async fn get_user_leagues(client: Client, token: &str, game_key: &str) -> Vec<UserLeague> {
-    let response = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, token).await;
-    if response.is_none() { return Vec::new() };
+pub async fn get_user_leagues(client: Client, token: String, game_key: &str, refresh_token: Option<String>) -> anyhow::Result<Vec<UserLeague>> {
+    let league_data = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, &token, refresh_token, 2).await?;
 
-    let league_data = response.unwrap();
-
-    if league_data.contains("token_rejected") {
-        panic!("PLEASE HANDLE TOKEN REFRESH");
-    }
-
-    let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
+    let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data)?;
 
     let mut leagues = Vec::new();
 
@@ -57,20 +62,18 @@ pub async fn get_user_leagues(client: Client, token: &str, game_key: &str) -> Ve
         });
     }
     
-    return leagues;
+    return Ok(leagues);
 }
 
-pub async fn get_league_standings(league_key: String, client: Client, token: String) -> Vec<LeagueStandings> {
-    let response = make_request(&format!("/league/{league_key}/standings"), client, &token).await;
-    if response.is_none() { return Vec::new() };
+pub async fn get_league_standings(league_key: &str, client: Client, token: String, refresh_token: Option<String>) -> anyhow::Result<Vec<LeagueStandings>> {
+    let league_data = make_request(&format!("/league/{league_key}/standings"), client, &token, refresh_token, 2).await?;
 
-    let league_data = response.unwrap();
-
-    if league_data.contains("token_rejected") {
+    if league_data.contains("token_expired") {
+        println!("{league_data}");
         panic!("PLEASE HANDLE TOKEN REFRESH");
     }
 
-    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
+    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data)?;
 
     let mut standings = Vec::new();
 
@@ -101,27 +104,19 @@ pub async fn get_league_standings(league_key: String, client: Client, token: Str
         );
     }
 
-    return standings;
+    return Ok(standings);
 }
 
-pub async fn get_team_roster(team_key: String, client: Client, token: String, opt_date: Option<String>) -> Vec<Roster> {
+pub async fn get_team_roster(team_key: &str, client: Client, token: String, opt_date: Option<String>, refresh_token: Option<String>) -> anyhow::Result<Vec<Roster>> {
     let url = if let Some(date) = opt_date {
         format!("/team/{team_key}/roster;date={date}/players/stats")
     } else {
         format!("/team/{team_key}/roster/players/stats")
     };
 
-    let response = make_request(&url, client, &token).await;
+    let league_data = make_request(&url, client, &token, refresh_token, 2).await?;
 
-    if response.is_none() { return Vec::new() };
-
-    let league_data = response.unwrap();
-
-    if league_data.contains("token_expired") {
-        panic!("PLEASE HANDLE TOKEN REFRESH");
-    }
-
-    let cleaned: xml_roster::FantasyContent = serde_xml_rs::from_str(&league_data).unwrap();
+    let cleaned: xml_roster::FantasyContent = serde_xml_rs::from_str(&league_data)?;
 
     let mut roster = Vec::new();
 
@@ -154,5 +149,5 @@ pub async fn get_team_roster(team_key: String, client: Client, token: String, op
         roster.push(model);
     }
 
-    return roster;
+    return Ok(roster);
 }

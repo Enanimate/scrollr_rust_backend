@@ -1,12 +1,29 @@
 use std::{env, sync::Arc};
 
-use axum::http::{HeaderMap, header::AUTHORIZATION};
+use axum::{Json, http::{HeaderMap, StatusCode, header::AUTHORIZATION}, response::{IntoResponse, Response}};
 use axum_extra::extract::CookieJar;
 use finance_service::types::FinanceHealth;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use utils::{database::{PgPool, initialize_pool}, log::warn};
-use yahoo_fantasy::api::Client;
+use yahoo_fantasy::{api::Client, types::Tokens};
+
+#[derive(Serialize)]
+pub struct ErrorCodeResponse {
+    status: String,
+    message: String,
+}
+
+impl ErrorCodeResponse {
+    pub fn new(status: StatusCode, message: &str) -> Response {
+        let response = ErrorCodeResponse {
+            status: status.as_str().to_string(),
+            message: message.to_string()
+        };
+
+        (status, Json(response)).into_response()
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SchedulePayload {
@@ -41,8 +58,9 @@ impl ServerState {
     }
 }
 
-pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<String> {
+pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<Tokens> {
     if let Some(auth_token) = headers.get(AUTHORIZATION) {
+        let refresh_token = headers.get("Refresh_Token");
         let access_token = auth_token
             .to_str()
             .inspect_err(|e| warn!("Access Token could not be cast as str: {e}"));
@@ -54,15 +72,34 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<String> {
                 token
             };
 
-            return Some(fixed_token.to_string());
+            let refresh = if let Some(token) = refresh_token {
+                Some(token.to_str().unwrap().to_string())
+            } else {
+                None
+            };
+
+            return Some(Tokens {
+                access_token: fixed_token.to_string(),
+                refresh_token: refresh
+            });
         } else {
             return None;
         }
     } else {
         if let Some(auth_cookie) = jar.get("yahoo-auth") {
             let token = auth_cookie.value_trimmed();
+            let refresh_cookie = jar.get("yahoo-refresh");
 
-            return Some(token.to_string());
+            let refresh = if let Some(token) = refresh_cookie {
+                Some(token.value_trimmed().to_string())
+            } else {
+                None
+            };
+
+            return Some(Tokens {
+                access_token: token.to_string(),
+                refresh_token: refresh,
+            });
         } else {
             return None;
         }
