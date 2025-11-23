@@ -5,7 +5,7 @@ use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::types::FinanceHealth;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use utils::{database::{PgPool, initialize_pool}, log::{debug, warn}};
+use utils::{database::{PgPool, initialize_pool}, log::{debug, info, warn}};
 use yahoo_fantasy::{api::Client, types::Tokens};
 
 #[derive(Serialize)]
@@ -58,9 +58,14 @@ impl ServerState {
     }
 }
 
-pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerState) -> Option<Tokens> {
+#[derive(Debug, Deserialize, Clone)]
+pub struct RefreshBody {
+    refresh_token: String
+}
+
+pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerState, refresh_token: Option<Json<RefreshBody>>) -> Option<Tokens> {
     if let Some(auth_token) = headers.get(AUTHORIZATION) {
-        let refresh_token = headers.get("Refresh_Token");
+        //let refresh_token = headers.get("refresh_token");
         let access_token = auth_token
             .to_str()
             .inspect_err(|e| warn!("Access Token could not be cast as str: {e}"));
@@ -73,7 +78,7 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerSta
             };
 
             let refresh = if let Some(token) = refresh_token {
-                Some(token.to_str().unwrap().to_string())
+                Some(token.refresh_token.clone())
             } else {
                 None
             };

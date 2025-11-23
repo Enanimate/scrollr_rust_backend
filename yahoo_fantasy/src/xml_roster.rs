@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize, de, ser::SerializeStruct};
 
-use crate::types;
+use crate::stats;
 
 #[derive(Debug, Deserialize)]
 pub struct FantasyContent {
@@ -83,7 +83,7 @@ pub struct Stats {
 
 #[derive(Debug)]
 pub struct Stat {
-    pub stat_name: types::Stats,
+    pub stat_name: stats::Stats,
     value: u32,
 }
 
@@ -101,7 +101,7 @@ impl<'de> Deserialize<'de> for Stat {
 
         let temp = StatXml::deserialize(deserializer)?;
 
-        let stats_enum = types::Stats::try_from(temp.raw_id)
+        let stats_enum = stats::Stats::try_from(temp.raw_id)
             .map_err(de::Error::custom)?;
 
         Ok(Stat {

@@ -2,7 +2,7 @@ use anyhow::{Context, anyhow};
 pub use oauth2::{http::header, reqwest::Client};
 use utils::log::info;
 
-use crate::{error::YahooError, types::{LeagueStandings, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_standings};
+use crate::{error::YahooError, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_standings};
 
 pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -40,36 +40,52 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
     Err(anyhow!("Exceeded number of retries allowed"))
 }
 
-pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) -> anyhow::Result<(Vec<UserLeague>, Option<(String, String)>)> {
+pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) -> anyhow::Result<(Leagues, Option<(String, String)>)> {
     //let league_data = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, &tokens, 2).await?;
     let (league_data, opt_tokens) = make_request(&format!("/users;use_login=1/games/leagues"), client, &tokens, 2).await?;
 
     let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data)?;
 
-    let mut leagues = Vec::new();
+    let mut nba = Vec::new();
+    let mut nfl = Vec::new();
 
     let users = cleaned.users.user;
     let games = users[0].games.game.clone();
-    let leagues_data = games[0].leagues.league.clone();
+    //let leagues_data = games[0].leagues.league.clone();
 
-    for league in leagues_data {
-        leagues.push(UserLeague {
-            league_key: league.league_key,
-            league_id: league.league_id,
-            name: league.name,
-            url: league.url,
-            logo_url: league.logo_url,
-            draft_status: league.draft_status,
-            num_teams: league.num_teams,
-            scoring_type: league.scoring_type,
-            league_type: league.league_type,
-            current_week: league.current_week,
-            start_week: league.start_week,
-            end_week: league.end_week,
-            season: league.season,
-            game_code: league.game_code,
-        });
+    for game in games {
+        let league_data = game.leagues.league.clone();
+
+        for league in league_data {
+            let user_league = UserLeague {
+                league_key: league.league_key,
+                league_id: league.league_id,
+                name: league.name,
+                url: league.url,
+                logo_url: league.logo_url,
+                draft_status: league.draft_status,
+                num_teams: league.num_teams,
+                scoring_type: league.scoring_type,
+                league_type: league.league_type,
+                current_week: league.current_week,
+                start_week: league.start_week,
+                end_week: league.end_week,
+                season: league.season,
+                game_code: league.game_code,
+            };
+
+            match user_league.game_code.as_str() {
+                "nba" => nba.push(user_league),
+                "nfl" => nfl.push(user_league),
+                _ => (),
+            }
+        }
     }
+
+    let leagues = Leagues {
+        nba,
+        nfl,
+    };
     
     return Ok((leagues, opt_tokens));
 }

@@ -108,7 +108,7 @@ pub fn init_async_logger(log_path: &str) -> Result<(), log::SetLoggerError> {
     let logger = AsyncLogger { sender };
 
     let res = log::set_logger(LOGGER.get_or_init(|| logger))
-        .map(|()| log::set_max_level(log::LevelFilter::Info));
+        .map(|()| log::set_max_level(log::LevelFilter::Debug));
 
     if res.is_ok() {
         tokio::spawn(log_writer_task(receiver, log_path.to_owned()));

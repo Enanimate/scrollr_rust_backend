@@ -32,7 +32,6 @@ pub async fn insert_csrf(pool: Arc<PgPool>, csrf: String) {
     let statement = "
         INSERT INTO internal.fantasy_userdata (csrf)
             VALUES ($1)
-        ON CONFLICT (csrf) DO NOTHING
     ";
 
     let conn = pool.acquire().await;

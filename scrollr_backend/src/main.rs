@@ -5,13 +5,13 @@ use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
-use scrollr_backend::{ErrorCodeResponse, SchedulePayload, ServerState, get_access_token, update_tokens};
+use scrollr_backend::{ErrorCodeResponse, RefreshBody, SchedulePayload, ServerState, get_access_token, update_tokens};
 use serde::{Deserialize, Serialize};
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, types::{LeagueStandings, UserLeague}, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, types::LeagueStandings, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -181,9 +181,6 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
                                 accessToken: {0},
                                 refreshToken: {1}
                             }}, '*'); 
-                        }} else {{
-                            document.cookie = `yahoo-auth={0}; domain=enanimate.dev; Secure;`;
-                            document.cookie = `yahoo-refresh={1}; domain=enanimate.dev; Secure;`;
                         }}
                     }} catch(e) {{
                         console.error("Error sending token via postMessage:", e);
@@ -203,9 +200,9 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
     (cookies, Html(html_content))
 }
 
-async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
     info!("start leagues!");
-    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
 
     if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
@@ -223,19 +220,14 @@ async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, head
     let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
 
 
-    #[derive(Serialize)]
-    struct Leagues {
-        leagues: Vec<UserLeague>,
-    }
-
     info!("end leagues");
 
-    (headers, updated_cookies, Json(Leagues { leagues })).into_response()
+    (headers, updated_cookies, Json(leagues)).into_response()
 }
 
-async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
     info!("start standings!");
-    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
     let initial_tokens = token_option.unwrap();
@@ -266,9 +258,9 @@ struct RosterDate {
     date: Option<String>,
 }
 
-async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
+async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
     info!("start roster! {team_key} {:?}", date.date);
-    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
     let initial_tokens = token_option.unwrap();
