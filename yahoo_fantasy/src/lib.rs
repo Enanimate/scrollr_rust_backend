@@ -14,7 +14,7 @@ mod xml_leagues;
 mod xml_standings;
 mod xml_roster;
 mod error;
-pub(crate) mod stats;
+pub mod stats;
 pub mod types;
 
 pub async fn start_fantasy_service(pool: Arc<PgPool>) {

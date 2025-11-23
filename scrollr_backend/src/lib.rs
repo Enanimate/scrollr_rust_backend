@@ -5,7 +5,7 @@ use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::types::FinanceHealth;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use utils::{database::{PgPool, initialize_pool}, log::{debug, info, warn}};
+use utils::{database::{PgPool, initialize_pool}, log::warn};
 use yahoo_fantasy::{api::Client, types::Tokens};
 
 #[derive(Serialize)]
@@ -136,7 +136,6 @@ pub fn update_tokens(headers: &mut HeaderMap, jar: CookieJar, new_tokens: Option
             .same_site(SameSite::Lax)
             .build();
 
-        debug!("added two cookies!");
         return jar.add(cookie_auth).add(cookie_refresh);
         } else {
             let access_result = HeaderValue::from_str(&access_token);

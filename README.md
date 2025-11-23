@@ -94,14 +94,22 @@ Json Response :
 
 ##### Team Roster: /team/{teamKey}/roster
 
+Query Parameters
+```
+sport=<sport>			//This is required
+						// Currently supports nfl or football
+                        
+date=<year-month-day>	// Optional
+```
+
 Authentication
 
- * Headers:
- ```
- Authorization: bearer <Access Token>
- Content-Type: application/json
- ```
- * Request Body: ` { "refresh_token": "<Refresh Token>" } `
+* Headers:
+```
+Authorization: bearer <Access Token>
+Content-Type: application/json
+```
+* Request Body: ` { "refresh_token": "<Refresh Token>" } `
 
 Json Response :
 ```

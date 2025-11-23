@@ -7,11 +7,12 @@ use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
 use scrollr_backend::{ErrorCodeResponse, RefreshBody, SchedulePayload, ServerState, get_access_token, update_tokens};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, types::LeagueStandings, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, stats::{FootballStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -254,36 +255,57 @@ async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(
 }
 
 #[derive(Deserialize)]
-struct RosterDate {
+struct RosterQuery {
     date: Option<String>,
+    sport: String,
 }
 
-async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
-    info!("start roster! {team_key} {:?}", date.date);
+async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
+    info!("start roster! {team_key} {:?}", query.date);
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
     let initial_tokens = token_option.unwrap();
 
-    let response = get_team_roster(&team_key, web_state.client, &initial_tokens, date.date.clone()).await;
+    fn create_response<T>(roster_vec: Vec<Roster<T>>, jar: CookieJar, new_tokens: Option<(String, String)>, inital_tokens: Tokens) -> Response 
+    where 
+        T: StatDecode + std::fmt::Display + serde::Serialize,
+        <T as TryFrom<u8>>::Error: std::fmt::Display
+    {
+        let mut headers = HeaderMap::new();
+        let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &inital_tokens.access_type);
 
-    if let Err(e) = response {
+        let response_json = json!({
+            "roster": roster_vec,
+        });
+
+        (headers, updated_cookies, Json(response_json)).into_response()
+    }
+
+    let result = match query.sport.as_str() {
+        "nfl" | "football" => {
+            let response = get_team_roster::<FootballStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
+            match response {
+                Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
+                Err(e) => Err(e)
+            }
+        }
+
+        _ => {
+            error!("Unsupported sport type: {}", query.sport);
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
+
+    if let Err(e) = result {
         error!("Error fetching roster for {team_key}: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let (roster, new_tokens) = response.unwrap();
-    
-    let mut headers = HeaderMap::new();
-    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
+    let final_response = result.unwrap();
 
-    #[derive(Serialize)]
-    struct Roster {
-        roster: Vec<yahoo_fantasy::types::Roster>,
-    }
-
-    info!("end roster! {team_key} {:?}", date.date);
-    (headers, updated_cookies, Json(Roster { roster })).into_response()
+    info!("end roster! {team_key} {:?}", query.date);
+    final_response
 }
 
 async fn finance_health(State(web_state): State<ServerState>) -> impl IntoResponse {

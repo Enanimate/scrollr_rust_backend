@@ -1,5 +1,13 @@
-#[derive(Debug, Clone, Copy)]
-pub enum Stats {
+use std::fmt::Debug;
+
+use serde::{Deserialize, Serialize};
+
+
+
+pub trait StatDecode: TryFrom<u8> + Debug + Sized {}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+pub enum FootballStats {
 // General Stats (O, DP, K, DT)
     GamesPlayed, // ID 0
     
@@ -99,7 +107,32 @@ pub enum Stats {
     FieldGoalsMissed, // ID 86
 }
 
-impl TryFrom<u8> for Stats {
+impl StatDecode for FootballStats {
+    
+}
+
+impl std::fmt::Display for FootballStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{:?}", self);
+        let mut result = String::new();
+        let mut chars = name.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c.is_uppercase() && result.len() > 0 {
+                if let Some(last_char) = result.chars().last() {
+                    if last_char.is_lowercase() {
+                        result.push(' ');
+                    }
+                }
+            }
+            result.push(c);
+        }
+        
+        write!(f, "{}", result.to_lowercase())
+    }
+}
+
+impl TryFrom<u8> for FootballStats {
     type Error = String;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {

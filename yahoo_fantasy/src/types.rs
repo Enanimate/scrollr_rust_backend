@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::xml_roster::{self, PlayerPoints};
+use crate::{stats::StatDecode, xml_roster::{self, PlayerPoints}};
 
 pub struct Tokens {
     pub access_token: String,
@@ -52,7 +52,11 @@ pub struct LeagueStandings {
 }
 
 #[derive(Serialize, Debug)]
-pub struct Roster {
+pub struct Roster<T>
+where
+    T: StatDecode + std::fmt::Display,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
     pub id: u32,
     pub key: String,
     pub name: String,
@@ -78,7 +82,7 @@ pub struct Roster {
     pub is_undroppable: bool,
     #[serde(rename="positionType")]
     pub position_type: String,
-    pub stats: Vec<xml_roster::Stat>,
+    pub stats: Vec<xml_roster::Stat<T>>,
     #[serde(rename="playerPoints")]
     pub player_points: PlayerPoints,
 }

@@ -1,29 +1,49 @@
 use serde::{Deserialize, Serialize, de, ser::SerializeStruct};
 
-use crate::stats;
+use crate::stats::{StatDecode};
 
 #[derive(Debug, Deserialize)]
-pub struct FantasyContent {
-    pub team: Team
+pub struct FantasyContent<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub team: Team<T>
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Team {
-    pub roster: Roster
+pub struct Team<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub roster: Roster<T>
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Roster {
-    pub players: Players
+pub struct Roster<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub players: Players<T>
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Players {
-    pub player: Vec<Player>
+pub struct Players<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub player: Vec<Player<T>>
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Player {
+pub struct Player<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
     pub player_key: String,
     pub player_id: u32,
     pub name: Name,
@@ -38,7 +58,7 @@ pub struct Player {
     pub headshot: Headshot,
     pub is_undroppable: bool,
     pub position_type: String,
-    pub player_stats: PlayerStats,
+    pub player_stats: PlayerStats<T>,
     pub player_points: PlayerPoints,
 }
 
@@ -72,25 +92,39 @@ pub struct PlayerPoints {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PlayerStats {
-    pub stats: Stats,
+pub struct PlayerStats<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub stats: Stats<T>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Stats {
-    pub stat: Vec<Stat>
+pub struct Stats<T>
+where
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
+    pub stat: Vec<Stat<T>>
 }
 
 #[derive(Debug)]
-pub struct Stat {
-    pub stat_name: stats::Stats,
+pub struct Stat<T> 
+{
+    pub stat_name: T,
     value: u32,
 }
 
-impl<'de> Deserialize<'de> for Stat {
+impl<'de, T> Deserialize<'de> for Stat<T> 
+where 
+    T: StatDecode,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> 
+        D: serde::Deserializer<'de>
     {
         #[derive(Deserialize)]
         struct StatXml {
@@ -101,7 +135,7 @@ impl<'de> Deserialize<'de> for Stat {
 
         let temp = StatXml::deserialize(deserializer)?;
 
-        let stats_enum = stats::Stats::try_from(temp.raw_id)
+        let stats_enum = T::try_from(temp.raw_id)
             .map_err(de::Error::custom)?;
 
         Ok(Stat {
@@ -111,33 +145,18 @@ impl<'de> Deserialize<'de> for Stat {
     }
 }
 
-impl Serialize for Stat {
+impl<T> Serialize for Stat<T> 
+where
+    T: StatDecode + std::fmt::Display + serde::Serialize
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer
     {
-        let formatted_name = {
-            let name = format!("{:?}", self.stat_name);
-            let mut result = String::new();
-            let mut chars = name.chars().peekable();
-
-            while let Some(c) = chars.next() {
-                if c.is_uppercase() && result.len() > 0 {
-                    if let Some(last_char) = result.chars().last() {
-                        if last_char.is_lowercase() {
-                            result.push(' ');
-                        }
-                    }
-                }
-                result.push(c);
-            }
-            result.trim().to_string()
-        };
-
         let mut state = serializer.serialize_struct("Stat", 2)?;
 
         
-        state.serialize_field("name", &formatted_name.to_lowercase())?;
+        state.serialize_field("name", &self.stat_name)?;
 
         state.serialize_field("value", &self.value)?;
 

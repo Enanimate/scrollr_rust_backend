@@ -2,7 +2,7 @@ use anyhow::{Context, anyhow};
 pub use oauth2::{http::header, reqwest::Client};
 use utils::log::info;
 
-use crate::{error::YahooError, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_standings};
+use crate::{error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_standings};
 
 pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -127,7 +127,11 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
     return Ok((standings, opt_tokens));
 }
 
-pub async fn get_team_roster(team_key: &str, client: Client, tokens: &Tokens, opt_date: Option<String>) -> anyhow::Result<(Vec<Roster>, Option<(String, String)>)> {
+pub async fn get_team_roster<T> (team_key: &str, client: Client, tokens: &Tokens, opt_date: Option<String>) -> anyhow::Result<(Vec<Roster<T>>, Option<(String, String)>)> 
+where 
+    T: StatDecode + serde::de::DeserializeOwned + std::fmt::Display,
+    <T as TryFrom<u8>>::Error: std::fmt::Display,
+{
     let url = if let Some(date) = opt_date {
         format!("/team/{team_key}/roster;date={date}/players/stats")
     } else {
@@ -136,7 +140,7 @@ pub async fn get_team_roster(team_key: &str, client: Client, tokens: &Tokens, op
 
     let (league_data, opt_tokens) = make_request(&url, client, &tokens, 2).await?;
 
-    let cleaned: xml_roster::FantasyContent = serde_xml_rs::from_str(&league_data)?;
+    let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data)?;
 
     let mut roster = Vec::new();
 
