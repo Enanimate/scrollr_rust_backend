@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize, de, ser::SerializeStruct};
+use utils::log::warn;
 
 use crate::stats::{StatDecode};
 
@@ -87,7 +88,8 @@ pub struct Headshot {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PlayerPoints {
     pub coverage_type: String,
-    pub week: u8,
+    pub week: Option<u8>,
+    pub date: Option<String>,
     pub total: f32,
 }
 
@@ -130,7 +132,7 @@ where
         struct StatXml {
             #[serde(rename = "stat_id")]
             raw_id: u8,
-            value: u32,
+            value: String,
         }
 
         let temp = StatXml::deserialize(deserializer)?;
@@ -138,9 +140,15 @@ where
         let stats_enum = T::try_from(temp.raw_id)
             .map_err(de::Error::custom)?;
 
+        let parsed_value = temp.value.parse::<u32>()
+            .unwrap_or_else(|e| {
+                warn!("Stat value parsing failed for ID {}: {} (Defaulting to 0)", temp.raw_id, e);
+                0
+            });
+
         Ok(Stat {
             stat_name: stats_enum,
-            value: temp.value,
+            value: parsed_value,
         })
     }
 }

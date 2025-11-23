@@ -7,6 +7,53 @@ use serde::{Deserialize, Serialize};
 pub trait StatDecode: TryFrom<u8> + Debug + Sized {}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+pub enum BasketballStats {
+    PointsScored, // ID 12
+    TotalRebounds, // ID 15
+    Assists, // ID 16
+    Steals, // ID 17
+    BlockedShots, // ID 18
+}
+
+impl StatDecode for BasketballStats {}
+
+impl TryFrom<u8> for BasketballStats {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            12 => Ok(Self::PointsScored),
+            15 => Ok(Self::TotalRebounds),
+            16 => Ok(Self::Assists),
+            17 => Ok(Self::Steals),
+            18 => Ok(Self::BlockedShots),
+            _ => Err(format!("TryFrom not implemented for Basketball Stat ID({value})"))
+        }
+    }
+}
+
+impl std::fmt::Display for BasketballStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{:?}", self);
+        let mut result = String::new();
+        let mut chars = name.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c.is_uppercase() && result.len() > 0 {
+                if let Some(last_char) = result.chars().last() {
+                    if last_char.is_lowercase() {
+                        result.push(' ');
+                    }
+                }
+            }
+            result.push(c);
+        }
+        
+        write!(f, "{}", result.to_lowercase())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub enum FootballStats {
 // General Stats (O, DP, K, DT)
     GamesPlayed, // ID 0
@@ -232,7 +279,7 @@ impl TryFrom<u8> for FootballStats {
             84 => Ok(Self::FieldGoalsTotalYards),
             85 => Ok(Self::FieldGoalsMade),
             86 => Ok(Self::FieldGoalsMissed),
-            _ => Err(format!("TryFrom not implemented for Stat ID({})", value))
+            _ => Err(format!("TryFrom not implemented for Stat ID({value})"))
         }
     }
 }

@@ -140,6 +140,7 @@ where
 
     let (league_data, opt_tokens) = make_request(&url, client, &tokens, 2).await?;
 
+    info!("{}", league_data);
     let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data)?;
 
     let mut roster = Vec::new();

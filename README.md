@@ -96,8 +96,10 @@ Json Response :
 
 Query Parameters
 ```
-sport=<sport>			//This is required
-						// Currently supports nfl or football
+sport=<sport>			// This is required
+						// Currently supports: 
+                        // nfl or football,
+                        // nba or basketball
                         
 date=<year-month-day>	// Optional
 ```
@@ -140,12 +142,10 @@ Json Response :
         ],
         playerPoints: {
         	coverage_type: "week",
-            week: 0,
+            week: 0 || null,
+            date: "year-month-day" || null,
             total: 00.00
         }
     ]
 }
 ```
-
-
-
