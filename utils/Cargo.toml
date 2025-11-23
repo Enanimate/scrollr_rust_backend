@@ -18,5 +18,4 @@ rand = "0.8"
 [features]
 finance = []
 sports = []
-fantasy = []
 

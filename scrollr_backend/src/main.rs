@@ -12,7 +12,7 @@ use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, start_fantasy_service, stats::{BasketballStats, FootballStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +31,6 @@ async fn main() {
 
     handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone(), Arc::clone(&web_state.finance_health))));
     handles.push(tokio::spawn(start_sports_service(web_state.db_pool.clone())));
-    handles.push(tokio::spawn(start_fantasy_service(web_state.db_pool.clone())));
 
     let cache_dir = PathBuf::from("./acme_cache");
 
@@ -82,7 +81,7 @@ async fn main() {
         .acceptor(acceptor)
         .serve(app.into_make_service())
         .await
-        .unwrap();
+        .expect("Failed to bind to port");
 
     join_all(handles).await;
 
@@ -121,7 +120,7 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
 
 async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Response {
     info!("start!");
-    let result = yahoo(web_state.db_pool, web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
+    let result = yahoo(web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
         .await
         .inspect_err(|e| error!("Yahoo Error: {e}"));
 
@@ -144,9 +143,12 @@ struct CodeResponse {
     state: String,
 }
 
-async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>, jar: CookieJar) -> impl IntoResponse {
+async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>, jar: CookieJar) -> Response {
     info!("{}", web_state.yahoo_callback);
-    let tokens = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
+    let tokens_option = exchange_for_token(tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
+    if tokens_option.is_none() { return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve tokens"); }
+
+    let tokens = tokens_option.unwrap();
     let access_token = tokens.access_token;
     let refresh_token = if let Some(token) = tokens.refresh_token {
         token
@@ -198,7 +200,7 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
     );
     let cookies = jar.add(cookie_auth).add(cookie_refresh);
 
-    (cookies, Html(html_content))
+    (cookies, Html(html_content)).into_response()
 }
 
 async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
@@ -229,7 +231,7 @@ async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, head
 async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
     info!("start standings!");
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
-    if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
+    if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
     let initial_tokens = token_option.unwrap();
 
@@ -263,7 +265,7 @@ struct RosterQuery {
 async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
     info!("start roster! {team_key} {:?}", query.date);
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
-    if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
+    if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
     let initial_tokens = token_option.unwrap();
 

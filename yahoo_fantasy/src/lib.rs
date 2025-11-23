@@ -1,7 +1,7 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::Client};
-use utils::database::{PgPool, fantasy::{create_tables, insert_csrf}};
+use utils::log::error;
 
 use crate::types::Tokens;
 
@@ -17,14 +17,8 @@ mod error;
 pub mod stats;
 pub mod types;
 
-pub async fn start_fantasy_service(pool: Arc<PgPool>) {
-    create_tables(pool).await;
-}
-
-pub async fn yahoo(pool: Arc<PgPool>, client_id: String, client_secret: String, callback_url: String) -> Result<(String, String), Box<dyn Error>> {
+pub async fn yahoo(client_id: String, client_secret: String, callback_url: String) -> Result<(String, String), Box<dyn Error>> {
     let csrf_token = CsrfToken::new_random();
-
-    insert_csrf(pool, csrf_token.clone().into_secret()).await;
 
     let client = BasicClient::new(ClientId::new(client_id))
         .set_client_secret(ClientSecret::new(client_secret))
@@ -41,7 +35,7 @@ pub async fn yahoo(pool: Arc<PgPool>, client_id: String, client_secret: String, 
     return Ok((auth_url.as_str().to_string(), csrf_token.into_secret()));
 }
 
-pub async fn exchange_for_token(_pool: Arc<PgPool>, authorization_code: String, client_id: String, client_secret: String, _csrf: String, callback_url: String) -> Tokens {
+pub async fn exchange_for_token(authorization_code: String, client_id: String, client_secret: String, _csrf: String, callback_url: String) -> Option<Tokens> {
     let client = BasicClient::new(ClientId::new(client_id.clone()))
         .set_client_secret(ClientSecret::new(client_secret.clone()))
         .set_auth_uri(AuthUrl::new(AUTH_URL.to_string()).unwrap())
@@ -54,23 +48,26 @@ pub async fn exchange_for_token(_pool: Arc<PgPool>, authorization_code: String, 
         .exchange_code(AuthorizationCode::new(authorization_code))
         .request_async(&http_client)
         .await
-        .unwrap();
+        .inspect_err(|e| error!("Failed exchanging Auth Token for Access Token: {e}"));
 
-    let access_token = token_result.access_token();
-    let refresh_token = if let Some(token) = token_result.refresh_token() {
+    if token_result.is_err() { return None };
+
+    let tokens = token_result.unwrap();
+    let access_token = tokens.access_token();
+    let refresh_token = if let Some(token) = tokens.refresh_token() {
         Some(token.clone().into_secret())
     } else {
         None
     };
 
-    return Tokens {
+    return Some(Tokens {
         access_token: access_token.clone().into_secret(),
         refresh_token: refresh_token,
         client_id,
         client_secret,
         callback_url,
         access_type: String::new(),
-    };
+    });
 }
 
 pub(crate) async fn exchange_refresh(client_id: String, client_secret: String, callback_url: String, old_refresh_token: String) -> Result<(String, String), Box<dyn Error>> {

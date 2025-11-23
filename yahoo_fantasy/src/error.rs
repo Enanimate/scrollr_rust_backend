@@ -1,6 +1,6 @@
 use std::error::Error;
 use serde::Deserialize;
-use utils::log::{error, info};
+use utils::log::error;
 
 use crate::exchange_refresh;
 
@@ -33,8 +33,6 @@ impl YahooError {
             Ok(error) => {
                 let raw_msg = error.description;
                 let error_type = Self::handle_checks(raw_msg);
-
-                info!("{error_type}");
 
                 if &error_type == "token_expired" {
                     if let Some(token) = refresh_token {

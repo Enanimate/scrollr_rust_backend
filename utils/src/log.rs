@@ -18,9 +18,29 @@ impl Log for AsyncLogger {
     }
 
     fn log(&self, record: &log::Record) {
+        let file_locator = if let Some(file) = record.file() {
+            let pat = format!("{}/src/", record.target());
+            let stripped = file.strip_prefix(&pat);
+            if let Some(filename) = stripped {
+                filename
+            } else {
+                file
+            }
+        } else {
+            "Unknown"
+        };
+
+        let line_locator = if let Some(line) = record.line() {
+            line.to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        let locator = format!("({file_locator} : {line_locator})");
+
         if self.enabled(record.metadata()) {
             let log_entry = format!(
-                "[{}] {} {} - {}\n",
+                "[{}] {} {} {locator} - {}\n",
                 chrono::Local::now(),
                 record.level(),
                 record.target(),

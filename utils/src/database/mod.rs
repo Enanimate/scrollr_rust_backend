@@ -10,9 +10,6 @@ pub mod finance;
 #[cfg(feature = "sports")]
 pub mod sports;
 
-#[cfg(feature = "fantasy")]
-pub mod fantasy;
-
 pub async fn initialize_pool() -> Result<PgPool> {
     let get_env_var = |key: &str| -> Result<String> {
         env::var(key).with_context(|| format!("Missing environment variable: {}", key))
