@@ -1,11 +1,11 @@
 use std::{env, sync::Arc};
 
-use axum::{Json, http::{HeaderMap, StatusCode, header::AUTHORIZATION}, response::{IntoResponse, Response}};
-use axum_extra::extract::CookieJar;
+use axum::{Json, http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION}, response::{IntoResponse, Response}};
+use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::types::FinanceHealth;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use utils::{database::{PgPool, initialize_pool}, log::warn};
+use utils::{database::{PgPool, initialize_pool}, log::{debug, warn}};
 use yahoo_fantasy::{api::Client, types::Tokens};
 
 #[derive(Serialize)]
@@ -58,7 +58,7 @@ impl ServerState {
     }
 }
 
-pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<Tokens> {
+pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerState) -> Option<Tokens> {
     if let Some(auth_token) = headers.get(AUTHORIZATION) {
         let refresh_token = headers.get("Refresh_Token");
         let access_token = auth_token
@@ -80,7 +80,11 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<Tokens> {
 
             return Some(Tokens {
                 access_token: fixed_token.to_string(),
-                refresh_token: refresh
+                refresh_token: refresh,
+                client_id: web_state.client_id,
+                client_secret: web_state.client_secret,
+                callback_url: web_state.yahoo_callback,
+                access_type: String::from("header")
             });
         } else {
             return None;
@@ -99,9 +103,48 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap) -> Option<Tokens> {
             return Some(Tokens {
                 access_token: token.to_string(),
                 refresh_token: refresh,
+                client_id: web_state.client_id,
+                client_secret: web_state.client_secret,
+                callback_url: web_state.yahoo_callback,
+                access_type: String::from("cookie")
             });
         } else {
             return None;
         }
     }
+}
+
+pub fn update_tokens(headers: &mut HeaderMap, jar: CookieJar, new_tokens: Option<(String, String)>, access_type: &str) -> CookieJar {
+    if let Some((access_token, refresh_token)) = new_tokens {
+        if access_type == "cookie" {
+            let cookie_auth = Cookie::build(("yahoo-auth", access_token))
+            .path("/yahoo")
+            .secure(true)
+            .http_only(true) 
+            .same_site(SameSite::Lax)
+            .build();
+
+        let cookie_refresh = Cookie::build(("yahoo-refresh", refresh_token))
+            .path("/yahoo")
+            .secure(true)
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .build();
+
+        debug!("added two cookies!");
+        return jar.add(cookie_auth).add(cookie_refresh);
+        } else {
+            let access_result = HeaderValue::from_str(&access_token);
+            let refresh_result = HeaderValue::from_str(&refresh_token);
+
+            if let Ok(access_header) = access_result {
+                headers.insert("X-New-Access-Token", access_header);
+            }
+            if let Ok(refresh_header) = refresh_result {
+                headers.insert("X-New-Refresh-Token", refresh_header);
+            }
+        }
+    }
+
+    return jar;
 }

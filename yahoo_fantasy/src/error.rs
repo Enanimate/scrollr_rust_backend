@@ -4,23 +4,20 @@ use utils::log::{error, info};
 
 use crate::exchange_refresh;
 
-pub struct ClientData {
-    client_id: String,
-    client_secret: String,
-    callback_url: String,
-    refresh_token: String,
-}
-
 #[derive(Debug)]
 pub enum YahooError {
-    Ok(),
+    Ok,
+    NewTokens(String, String),
+    Failed,
     Error(String),
 }
 
 impl std::fmt::Display for YahooError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            YahooError::Ok() => write!(f, "YahooError::Ok()"),
+            YahooError::Ok => write!(f, "YahooError::Ok"),
+            YahooError::NewTokens(_, _) => write!(f, "YahooError::NewTokens([REDACTED], [REDACTED])"),
+            YahooError::Failed => write!(f, "YahooError::Failed"),
             YahooError::Error(e) => write!(f, "YahooError({})", e),
         }
     }
@@ -29,7 +26,7 @@ impl std::fmt::Display for YahooError {
 impl Error for YahooError {}
 
 impl YahooError {
-    pub async fn check_response(response: String, client_id: String, client_secret: String, callback_url: String, refresh_token: String) -> YahooError {
+    pub async fn check_response(response: String, client_id: String, client_secret: String, callback_url: String, refresh_token: Option<String>) -> YahooError {
         let cleaned = serde_xml_rs::from_str::<YahooErrorResponse>(&response);
 
         match cleaned {
@@ -40,15 +37,19 @@ impl YahooError {
                 info!("{error_type}");
 
                 if &error_type == "token_expired" {
-                    let a = exchange_refresh(client_id, client_secret, callback_url, refresh_token).await.unwrap();
-                    println!("{a:?}");
-                    return Self::Ok();
+                    if let Some(token) = refresh_token {
+                        let (a, b) = exchange_refresh(client_id, client_secret, callback_url, token).await.unwrap();
+                        println!("access {a:#?}\n refresh{b:#?}");
+                        return Self::NewTokens(a, b);
+                    } else {
+                        return Self::Failed;
+                    }
                 } else {
                     return Self::Error(error_type);
                 }
             },
             Err(_) => {
-                return Self::Ok();
+                return Self::Ok;
             },
         }
     }

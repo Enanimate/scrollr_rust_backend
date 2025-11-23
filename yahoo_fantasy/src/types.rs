@@ -4,7 +4,11 @@ use crate::xml_roster::{self, PlayerPoints};
 
 pub struct Tokens {
     pub access_token: String,
-    pub refresh_token: Option<String>
+    pub refresh_token: Option<String>,
+    pub client_id: String,
+    pub client_secret: String,
+    pub callback_url: String,
+    pub access_type: String,
 }
 
 #[derive(Debug, Clone, Copy)]

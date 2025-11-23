@@ -1,11 +1,11 @@
 use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc};
 
 use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
-use axum_extra::extract::CookieJar;
+use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
-use scrollr_backend::{ErrorCodeResponse, SchedulePayload, ServerState, get_access_token};
+use scrollr_backend::{ErrorCodeResponse, SchedulePayload, ServerState, get_access_token, update_tokens};
 use serde::{Deserialize, Serialize};
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
@@ -143,7 +143,7 @@ struct CodeResponse {
     state: String,
 }
 
-async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>) -> Result<Html<String>, StatusCode> {
+async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>, jar: CookieJar) -> impl IntoResponse {
     info!("{}", web_state.yahoo_callback);
     let tokens = exchange_for_token(web_state.db_pool, tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
     let access_token = tokens.access_token;
@@ -152,6 +152,20 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
     } else {
         String::new()
     };
+
+    let cookie_auth = Cookie::build(("yahoo-auth", access_token.clone()))
+        .path("/yahoo")
+        .secure(true)
+        .http_only(true) 
+        .same_site(SameSite::Lax)
+        .build();
+
+    let cookie_refresh = Cookie::build(("yahoo-refresh", refresh_token.clone()))
+        .path("/yahoo")
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .build();
 
     let html_content = format!(
         r#"
@@ -184,18 +198,30 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
         serde_json::to_string(&access_token).unwrap_or_else(|_| "\"error\"".to_string()),
         serde_json::to_string(&refresh_token).unwrap_or_else(|_| "\"error\"".to_string()),
     );
+    let cookies = jar.add(cookie_auth).add(cookie_refresh);
 
-    Ok(Html(html_content))
+    (cookies, Html(html_content))
 }
 
 async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
     info!("start leagues!");
-    let token_option = get_access_token(jar, headers);
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
 
     if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
-    let tokens = token_option.unwrap();
-    let leagues_result = get_user_leagues(web_state.client, tokens.access_token, "nfl", tokens.refresh_token).await;
+    let initial_tokens = token_option.unwrap();
+
+    let response = get_user_leagues(&initial_tokens, web_state.client, "nfl").await;
+
+    if let Err(e) = response {
+        error!("Error fetching leagues for user: {e}");
+        return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch leagues: {e}").as_str());
+    }
+
+    let (leagues, new_tokens) = response.unwrap();
+    let mut headers = HeaderMap::new();
+    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
+
 
     #[derive(Serialize)]
     struct Leagues {
@@ -203,23 +229,27 @@ async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, head
     }
 
     info!("end leagues");
-    match leagues_result {
-        Ok(leagues) => Json(Leagues { leagues }).into_response(),
-        Err(e) => {
-            error!("Error fetching leagues for user: {e}");
-            ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch leagues: {e}").as_str())
-        }
-    }
+
+    (headers, updated_cookies, Json(Leagues { leagues })).into_response()
 }
 
 async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
     info!("start standings!");
-    let token_option = get_access_token(jar, headers);
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
-    let tokens = token_option.unwrap();
+    let initial_tokens = token_option.unwrap();
 
-    let standings_result = get_league_standings(&league_key, web_state.client, tokens.access_token, tokens.refresh_token).await;
+    let response = get_league_standings(&league_key, web_state.client, &initial_tokens).await;
+
+    if let Err(e) = response {
+        error!("Error fetching standings for {league_key}: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let (standings, new_tokens) = response.unwrap();
+    let mut headers = HeaderMap::new();
+    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
 
     #[derive(Serialize)]
     struct Standings {
@@ -227,13 +257,8 @@ async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(
     }
 
     info!("end standings!");
-    match standings_result {
-        Ok(standings) => Json(Standings { standings }).into_response(),
-        Err(e) => {
-            error!("Error fetching standings for {league_key}: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
+
+    (headers, updated_cookies, Json(Standings { standings })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -243,12 +268,22 @@ struct RosterDate {
 
 async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap) -> Response {
     info!("start roster! {team_key} {:?}", date.date);
-    let token_option = get_access_token(jar, headers);
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone());
     if token_option.is_none() { return StatusCode::UNAUTHORIZED.into_response() }
 
-    let tokens = token_option.unwrap();
+    let initial_tokens = token_option.unwrap();
 
-    let roster_result = get_team_roster(&team_key, web_state.client, tokens.access_token, date.date.clone(), tokens.refresh_token).await;
+    let response = get_team_roster(&team_key, web_state.client, &initial_tokens, date.date.clone()).await;
+
+    if let Err(e) = response {
+        error!("Error fetching roster for {team_key}: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let (roster, new_tokens) = response.unwrap();
+    
+    let mut headers = HeaderMap::new();
+    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
 
     #[derive(Serialize)]
     struct Roster {
@@ -256,19 +291,11 @@ async fn team_roster(Query(date): Query<RosterDate>, Path(team_key): Path<String
     }
 
     info!("end roster! {team_key} {:?}", date.date);
-    match roster_result {
-        Ok(roster) => Json(Roster { roster }).into_response(),
-        Err(e) => {
-            error!("Error fetching roster for {team_key}: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
-
-    
+    (headers, updated_cookies, Json(Roster { roster })).into_response()
 }
 
-async fn finance_health(State(web_state): State<ServerState>) -> Response {
+async fn finance_health(State(web_state): State<ServerState>) -> impl IntoResponse {
     let health = web_state.finance_health.lock().await.get_health();
 
-    return Json(health).into_response();
+    Json(health)
 }

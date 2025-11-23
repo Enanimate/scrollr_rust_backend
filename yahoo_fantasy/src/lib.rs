@@ -1,7 +1,7 @@
-use std::{error::Error, str::FromStr, sync::Arc};
+use std::{error::Error, sync::Arc};
 
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::Client};
-use utils::database::{PgPool, fantasy::{Uuid, create_tables, insert_csrf}};
+use utils::database::{PgPool, fantasy::{create_tables, insert_csrf}};
 
 use crate::types::Tokens;
 
@@ -41,8 +41,8 @@ pub async fn yahoo(pool: Arc<PgPool>, client_id: String, client_secret: String, 
 }
 
 pub async fn exchange_for_token(_pool: Arc<PgPool>, authorization_code: String, client_id: String, client_secret: String, _csrf: String, callback_url: String) -> Tokens {
-    let client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
+    let client = BasicClient::new(ClientId::new(client_id.clone()))
+        .set_client_secret(ClientSecret::new(client_secret.clone()))
         .set_auth_uri(AuthUrl::new(AUTH_URL.to_string()).unwrap())
         .set_token_uri(TokenUrl::new(TOKEN_URL.to_string()).unwrap())
         .set_redirect_uri(RedirectUrl::new(callback_url.clone()).unwrap());
@@ -65,6 +65,10 @@ pub async fn exchange_for_token(_pool: Arc<PgPool>, authorization_code: String, 
     return Tokens {
         access_token: access_token.clone().into_secret(),
         refresh_token: refresh_token,
+        client_id,
+        client_secret,
+        callback_url,
+        access_type: String::new(),
     };
 }
 
