@@ -41,7 +41,6 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
 }
 
 pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) -> anyhow::Result<(Leagues, Option<(String, String)>)> {
-    //let league_data = make_request(&format!("/users;use_login=1/games;game_keys={game_key}/leagues"), client, &tokens, 2).await?;
     let (league_data, opt_tokens) = make_request(&format!("/users;use_login=1/games/leagues"), client, &tokens, 2).await?;
 
     let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data)?;
@@ -51,7 +50,6 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) 
 
     let users = cleaned.users.user;
     let games = users[0].games.game.clone();
-    //let leagues_data = games[0].leagues.league.clone();
 
     for game in games {
         let league_data = game.leagues.league.clone();
@@ -140,7 +138,6 @@ where
 
     let (league_data, opt_tokens) = make_request(&url, client, &tokens, 2).await?;
 
-    info!("{}", league_data);
     let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data)?;
 
     let mut roster = Vec::new();

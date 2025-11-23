@@ -39,7 +39,6 @@ impl YahooError {
                 if &error_type == "token_expired" {
                     if let Some(token) = refresh_token {
                         let (a, b) = exchange_refresh(client_id, client_secret, callback_url, token).await.unwrap();
-                        println!("access {a:#?}\n refresh{b:#?}");
                         return Self::NewTokens(a, b);
                     } else {
                         return Self::Failed;
