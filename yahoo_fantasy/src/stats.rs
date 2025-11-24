@@ -7,6 +7,63 @@ use serde::{Deserialize, Serialize};
 pub trait StatDecode: TryFrom<u8> + Debug + Sized {}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+pub enum HockeyStats {
+    Goals, // ID 1
+    Assists, // ID 2
+    PlusMinus, // ID 4
+    PowerplayPoints, // ID 8,
+    ShotsOnGoal, // ID 14,
+    Wins, // ID 19,
+    GoalsAgainst, // ID 22,
+    Saves, // ID 25,
+    Shutouts, // ID 27  
+    Blocks, // ID 32,
+}
+
+impl StatDecode for HockeyStats {}
+
+impl TryFrom<u8> for HockeyStats {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Goals),
+            2 => Ok(Self::Assists),
+            4 => Ok(Self::PlusMinus),
+            8 => Ok(Self::PowerplayPoints),
+            14 => Ok(Self::ShotsOnGoal),
+            19 => Ok(Self::Wins),
+            22 => Ok(Self::GoalsAgainst),
+            25 => Ok(Self::Saves),
+            27 => Ok(Self::Shutouts),
+            32 => Ok(Self::Blocks),
+            _ => Err(format!("TryFrom not implemented for Hockey Stat ID({value})"))
+        }
+    }
+}
+
+impl std::fmt::Display for HockeyStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = format!("{:?}", self);
+        let mut result = String::new();
+        let mut chars = name.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c.is_uppercase() && result.len() > 0 {
+                if let Some(last_char) = result.chars().last() {
+                    if last_char.is_lowercase() {
+                        result.push(' ');
+                    }
+                }
+            }
+            result.push(c);
+        }
+        
+        write!(f, "{}", result.to_lowercase())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub enum BasketballStats {
     PointsScored, // ID 12
     TotalRebounds, // ID 15

@@ -15,6 +15,7 @@ pub struct Tokens {
 pub struct Leagues {
     pub nba: Vec<UserLeague>,
     pub nfl: Vec<UserLeague>,
+    pub nhl: Vec<UserLeague>,
 }
 
 #[derive(Serialize, Debug)]

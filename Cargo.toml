@@ -6,3 +6,4 @@ members = [
     "sports_service",
     "yahoo_fantasy"
 ]
+resolver = "3"

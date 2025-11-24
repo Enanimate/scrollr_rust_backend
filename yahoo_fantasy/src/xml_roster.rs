@@ -36,7 +36,7 @@ where
     T: StatDecode,
     <T as TryFrom<u8>>::Error: std::fmt::Display,
 {
-    pub player: Vec<Player<T>>
+    pub player: Option<Vec<Player<T>>>
 }
 
 #[derive(Debug, Deserialize)]

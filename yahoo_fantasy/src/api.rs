@@ -47,6 +47,7 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) 
 
     let mut nba = Vec::new();
     let mut nfl = Vec::new();
+    let mut nhl = Vec::new();
 
     let users = cleaned.users.user;
     let games = users[0].games.game.clone();
@@ -75,6 +76,7 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) 
             match user_league.game_code.as_str() {
                 "nba" => nba.push(user_league),
                 "nfl" => nfl.push(user_league),
+                "nhl" => nhl.push(user_league),
                 _ => (),
             }
         }
@@ -83,6 +85,7 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) 
     let leagues = Leagues {
         nba,
         nfl,
+        nhl,
     };
     
     return Ok((leagues, opt_tokens));
@@ -144,7 +147,7 @@ where
 
     let team = cleaned.team;
     let players = team.roster.players.player;
-    for player in players {
+    for player in players.unwrap_or(Vec::new()) {
         let eligible = player.eligible_positions.position;
         let stats = player.player_stats.stats.stat;
 

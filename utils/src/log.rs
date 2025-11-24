@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, sync::OnceLock};
+use std::{fs::{self, File}, io::Write, sync::OnceLock};
 use log::{Level, Log};
 use tokio::sync::mpsc;
 
@@ -55,6 +55,11 @@ impl Log for AsyncLogger {
 }
 
 pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_path: String) {
+    if let Err(e) = fs::create_dir_all(&log_file_path) {
+        error!("Failed to create log directory: {e}");
+        warn!("Continuing, logs will not be stored...");
+    }
+    
     let mut finance = match File::create(format!("{log_file_path}/finance.log")) {
         Ok(f) => f,
         Err(e) => {

@@ -12,7 +12,7 @@ use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
+use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -295,6 +295,14 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
 
         "nba" | "basketball" => {
             let response = get_team_roster::<BasketballStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
+            match response {
+                Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
+                Err(e) => Err(e)
+            }
+        }
+
+        "nhl" | "hockey" => {
+            let response = get_team_roster::<HockeyStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
             match response {
                 Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
                 Err(e) => Err(e)
