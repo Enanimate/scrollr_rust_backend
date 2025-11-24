@@ -47,7 +47,7 @@ async fn main() {
 
     tokio::spawn(async move {
         loop {
-            match state.next().await.unwrap() {
+            match state.next().await.expect("ACME Error") {
                 Ok(ok) => info!("event: {ok:?}"),
                 Err(err) => error!("error: {err:?}"),
             }

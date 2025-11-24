@@ -35,7 +35,9 @@ async fn ws_send(mut writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>
     }).collect();
 
     let mut stream = iter(messages).map(|m| Ok(m));
-    writer.send_all(&mut stream).await.unwrap();
+    if let Err(e) = writer.send_all(&mut stream).await {
+        error!("Error sending subscription message to WebSocket: {e}");
+    }
 }
 
 async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>, state: Arc<RwLock<WebSocketState>>, client: Arc<Client>, pool: Arc<PgPool>, health_state: Arc<Mutex<FinanceHealth>>) {

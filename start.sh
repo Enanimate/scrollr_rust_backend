@@ -18,14 +18,18 @@ if [ -d "./release" ]; then
   echo "Previous build found..."
   echo "Cleaning up..."
 
-  rm -rf ./release
+  rm -rf ./release/configs
+  rm -rf ./release/logs
+  rm ./release/scrollr_backend
+  rm ./release/.env
+else
+  mkdir release
 fi
 
 echo "Starting compilation..."
 cargo build --release
 echo "Compilation complete..."
 
-mkdir release
 mkdir ./release/configs
 mv target/release/scrollr_backend ./release
 cp -r ./configs ./release

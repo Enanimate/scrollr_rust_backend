@@ -71,18 +71,18 @@ pub struct FinanceState {
 
 impl FinanceState {
     pub fn new(pool: Arc<PgPool>) -> Self {
-        let file_contents = fs::read_to_string("./configs/subscriptions.json").unwrap();
-        let subscriptions = serde_json::from_str(&file_contents).unwrap();
+        let file_contents = fs::read_to_string("./configs/subscriptions.json").expect("Finance configs missing...");
+        let subscriptions = serde_json::from_str(&file_contents).expect("Failed parsing finance configs as Json");
 
-        let api_key = env::var("FINNHUB_API_KEY").unwrap();
+        let api_key = env::var("FINNHUB_API_KEY").expect("Finnhub API key needs to be set in .env");
 
         let mut headers: HeaderMap = HeaderMap::new();
-        headers.append("X-Finnhub-Token", HeaderValue::from_str(&api_key).unwrap());
+        headers.append("X-Finnhub-Token", HeaderValue::from_str(&api_key).expect("Failed casting api_key to HeaderValue"));
 
         let client = Client::builder()
             .default_headers(headers)
             .timeout(Duration::from_millis(10_000))
-            .build().unwrap();
+            .build().expect("Failed creating finance Reqwest Client");
 
         Self {
             api_key,
