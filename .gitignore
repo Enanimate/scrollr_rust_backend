@@ -3,3 +3,4 @@
 *.log
 /acme_cache
 /release
+/logs

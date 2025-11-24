@@ -1,9 +1,24 @@
 # Scrollr
 
+## Quick Start
+1. Download and install Rust from [here](https://rust-lang.org/learn/get-started/).
+2. Clone this repository.
+3. Rename .env.example as .env and fill out any missing information.
+4. Make start.sh executable if it isn't.
+5. Generate and run the release build of this backend by running start.sh with `./start.sh`
+6. That's it, the compiled program now exists at the new `/release` folder in the root directory, this also happens to be where you can find logs, configuration information, as well as your the active.env. Once the `/release` directory is generated you can run the program again in the future either by using `./start` again or by entering the `/release` folder and manually running the program with `./scrollr_backend`. 
+
 ## API
 
 ### Yahoo Fantasy Sports
 ##### Base Endpoint: /yahoo
+
+##### Initial Authentication with Yahoo: /start
+This is the starting point for Yahoo Authentication and will redirect the user to a Yahoo login page. This is not for refreshing an expired access_token, any other `/yahoo` endpoint should be capable of refreshing an expired token, do not use this one.
+
+##### Callback: /yahoo/callback
+This endpoint is stored with Yahoo as a way to verify they are interacting with who our app claims to be, any user of `/start` will be redirected here after logging in to Yahoo. This endpoint also provisions our users with their access and refresh tokens.
+
 ##### User Leagues: /leagues
 
 Authentication
@@ -99,7 +114,8 @@ Query Parameters
 sport=<sport>			// This is required
 						// Currently supports: 
                         // nfl or football,
-                        // nba or basketball
+                        // nba or basketball,
+                        // nhl or hockey,
                         
 date=<year-month-day>	// Optional
 ```

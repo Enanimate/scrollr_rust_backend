@@ -119,7 +119,6 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
 }
 
 async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Response {
-    info!("start!");
     let result = yahoo(web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
         .await
         .inspect_err(|e| error!("Yahoo Error: {e}"));
@@ -144,7 +143,6 @@ struct CodeResponse {
 }
 
 async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>, jar: CookieJar) -> Response {
-    info!("{}", web_state.yahoo_callback);
     let tokens_option = exchange_for_token(tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
     if tokens_option.is_none() { return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve tokens"); }
 
@@ -204,7 +202,6 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
 }
 
 async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
-    info!("start leagues!");
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
 
     if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
@@ -222,14 +219,10 @@ async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, head
     let mut headers = HeaderMap::new();
     let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
 
-
-    info!("end leagues");
-
     (headers, updated_cookies, Json(leagues)).into_response()
 }
 
 async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
-    info!("start standings!");
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
     if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
@@ -251,8 +244,6 @@ async fn league_standings(Path(league_key): Path<String>, jar: CookieJar, State(
         standings: Vec<LeagueStandings>,
     }
 
-    info!("end standings!");
-
     (headers, updated_cookies, Json(Standings { standings })).into_response()
 }
 
@@ -263,7 +254,6 @@ struct RosterQuery {
 }
 
 async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
-    info!("start roster! {team_key} {:?}", query.date);
     let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
     if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
 
@@ -322,7 +312,6 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
 
     let final_response = result.unwrap();
 
-    info!("end roster! {team_key} {:?}", query.date);
     final_response
 }
 
