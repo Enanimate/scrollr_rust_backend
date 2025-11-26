@@ -2,6 +2,7 @@ use serde::Serialize;
 
 use crate::{stats::StatDecode, xml_roster::{self, PlayerPoints}};
 
+#[derive(Clone)]
 pub struct Tokens {
     pub access_token: String,
     pub refresh_token: Option<String>,
@@ -47,16 +48,16 @@ pub struct LeagueStandings {
     pub losses: u8,
     pub ties: u8,
     pub percentage: String,
-    pub games_back: f32,
-    pub points_for: f32,
-    pub points_against: f32,
+    pub games_back: String,
+    pub points_for: String,
+    pub points_against: String,
 }
 
 #[derive(Serialize, Debug)]
 pub struct Roster<T>
 where
     T: StatDecode + std::fmt::Display,
-    <T as TryFrom<u8>>::Error: std::fmt::Display,
+    <T as TryFrom<u32>>::Error: std::fmt::Display,
 {
     pub id: u32,
     pub key: String,

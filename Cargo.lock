@@ -3535,6 +3535,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde-xml-rs",
+ "serde_json",
  "utils",
 ]
 

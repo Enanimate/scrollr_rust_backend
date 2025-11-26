@@ -13,9 +13,11 @@ pub mod api;
 mod xml_leagues;
 mod xml_standings;
 mod xml_roster;
+mod xml_settings;
 mod error;
 pub mod stats;
 pub mod types;
+pub mod debug;
 
 pub async fn yahoo(client_id: String, client_secret: String, callback_url: String) -> Result<(String, String), Box<dyn Error>> {
     let csrf_token = CsrfToken::new_random();

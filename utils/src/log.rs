@@ -97,25 +97,25 @@ pub async fn log_writer_task(mut receiver: mpsc::Receiver<LogMessage>, log_file_
     while let Some(msg) = receiver.recv().await {
         println!("{msg}");
 
-        if msg.contains("finance") {
+        if msg.contains("finance_service") {
             if let Err(e) = finance.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
         }
 
-        if msg.contains("sports") {
+        if msg.contains("sports_service") {
             if let Err(e) = sports.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
         }
 
-        if msg.contains("fantasy") {
+        if msg.contains("yahoo_fantasy") {
             if let Err(e) = fantasy.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }
         }
 
-        if msg.contains("backend") {
+        if msg.contains("scrollr_backend") {
             if let Err(e) = backend.write_all(msg.as_bytes()) {
                 eprintln!("Error writing log data to disk: {}", e);
             }

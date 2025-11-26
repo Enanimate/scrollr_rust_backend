@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 
 
-pub trait StatDecode: TryFrom<u8> + Debug + Sized {}
+pub trait StatDecode: TryFrom<u32> + Debug + Sized {
+    fn expected_sport() -> &'static str;
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub enum HockeyStats {
@@ -20,12 +22,16 @@ pub enum HockeyStats {
     Blocks, // ID 32,
 }
 
-impl StatDecode for HockeyStats {}
+impl StatDecode for HockeyStats {
+    fn expected_sport() -> &'static str {
+        "hockey"
+    }
+}
 
-impl TryFrom<u8> for HockeyStats {
+impl TryFrom<u32> for HockeyStats {
     type Error = String;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::Goals),
             2 => Ok(Self::Assists),
@@ -65,25 +71,45 @@ impl std::fmt::Display for HockeyStats {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy)]
 pub enum BasketballStats {
+    MinutesPlayed, // ID 1
+    ThreePointAttempts, // ID 4
+    FieldGoalPercentage, // ID 5
+    FreeThrowPercentage, // ID 8
+    ThreePointShotsMade, // ID 10
     PointsScored, // ID 12
     TotalRebounds, // ID 15
     Assists, // ID 16
     Steals, // ID 17
     BlockedShots, // ID 18
+    Turnovers, // ID 19
+    FieldGoalsMade, // ID 9004003
+    FreeThrowsMade, // ID 9007006
 }
 
-impl StatDecode for BasketballStats {}
+impl StatDecode for BasketballStats {
+    fn expected_sport() -> &'static str {
+        "basketball"
+    }
+}
 
-impl TryFrom<u8> for BasketballStats {
+impl TryFrom<u32> for BasketballStats {
     type Error = String;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
+            1 => Ok(Self::MinutesPlayed),
+            4 => Ok(Self::ThreePointAttempts),
+            5 => Ok(Self::FieldGoalPercentage),
+            8 => Ok(Self::FreeThrowPercentage),
+            10 => Ok(Self::ThreePointShotsMade),
             12 => Ok(Self::PointsScored),
             15 => Ok(Self::TotalRebounds),
             16 => Ok(Self::Assists),
             17 => Ok(Self::Steals),
             18 => Ok(Self::BlockedShots),
+            19 => Ok(Self::Turnovers),
+            9004003 => Ok(Self::FieldGoalsMade),
+            9007006 => Ok(Self::FreeThrowsMade),
             _ => Err(format!("TryFrom not implemented for Basketball Stat ID({value})"))
         }
     }
@@ -212,7 +238,9 @@ pub enum FootballStats {
 }
 
 impl StatDecode for FootballStats {
-    
+    fn expected_sport() -> &'static str {
+        "football"
+    }
 }
 
 impl std::fmt::Display for FootballStats {
@@ -236,10 +264,10 @@ impl std::fmt::Display for FootballStats {
     }
 }
 
-impl TryFrom<u8> for FootballStats {
+impl TryFrom<u32> for FootballStats {
     type Error = String;
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::GamesPlayed),
             1 => Ok(Self::PassingAttempts),

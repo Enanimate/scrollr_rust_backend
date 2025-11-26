@@ -1,8 +1,8 @@
 use anyhow::{Context, anyhow};
 pub use oauth2::{http::header, reqwest::Client};
-use utils::log::info;
+use utils::log::{error, info};
 
-use crate::{error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_standings};
+use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_settings::{self}, xml_standings};
 
 pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -40,10 +40,10 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
     Err(anyhow!("Exceeded number of retries allowed"))
 }
 
-pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) -> anyhow::Result<(Leagues, Option<(String, String)>)> {
+pub async fn get_user_leagues(tokens: &Tokens, client: Client) -> anyhow::Result<(Leagues, Option<(String, String)>)> {
     let (league_data, opt_tokens) = make_request(&format!("/users;use_login=1/games/leagues"), client, &tokens, 2).await?;
 
-    let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data)?;
+    let cleaned: xml_leagues::FantasyContent = serde_xml_rs::from_str(&league_data).inspect_err(|e| error!("Deserialization error in leagues: {e}"))?;
 
     let mut nba = Vec::new();
     let mut nfl = Vec::new();
@@ -94,8 +94,7 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client, _game_key: &str) 
 pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tokens) -> anyhow::Result<(Vec<LeagueStandings>, Option<(String, String)>)> {
     let (league_data, opt_tokens) = make_request(&format!("/league/{league_key}/standings"), client, &tokens, 2).await?;
 
-
-    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data)?;
+    let cleaned: xml_standings::FantasyContent = serde_xml_rs::from_str(&league_data).inspect_err(|e| error!("Deserialization error in standings: {e}"))?;
 
     let mut standings = Vec::new();
     let league = cleaned.league;
@@ -106,7 +105,7 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
         let outcome_total = team_standings.outcome_totals;
 
         let percentage = outcome_total.percentage.unwrap_or_else(|| "0.0".to_string());
-        let games_back = team_standings.games_back.unwrap_or(0.0);
+        let games_back = team_standings.games_back.unwrap_or("0.0".to_string());
         standings.push(
             LeagueStandings {
                 team_key: team.team_key,
@@ -119,8 +118,8 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
                 ties: outcome_total.ties,
                 percentage: percentage,
                 games_back: games_back,
-                points_for: team_standings.points_for,
-                points_against: team_standings.points_against,
+                points_for: team_standings.points_for.unwrap_or("0".to_string()),
+                points_against: team_standings.points_against.unwrap_or("0".to_string()),
             }
         );
     }
@@ -131,7 +130,7 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
 pub async fn get_team_roster<T> (team_key: &str, client: Client, tokens: &Tokens, opt_date: Option<String>) -> anyhow::Result<(Vec<Roster<T>>, Option<(String, String)>)> 
 where 
     T: StatDecode + serde::de::DeserializeOwned + std::fmt::Display,
-    <T as TryFrom<u8>>::Error: std::fmt::Display,
+    <T as TryFrom<u32>>::Error: std::fmt::Display,
 {
     let url = if let Some(date) = opt_date {
         format!("/team/{team_key}/roster;date={date}/players/stats")
@@ -141,7 +140,9 @@ where
 
     let (league_data, opt_tokens) = make_request(&url, client, &tokens, 2).await?;
 
-    let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data)?;
+    let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data).inspect_err(|e| {
+        error!("Deserialization error in roster: {e}");
+    })?;
 
     let mut roster = Vec::new();
 
@@ -175,4 +176,53 @@ where
     }
 
     return Ok((roster, opt_tokens));
+}
+
+pub async fn debug_league_stats(client: Client, tokens: &Tokens) -> anyhow::Result<(LeagueStats, Option<(String, String)>)> {
+    let (leagues_info, _) = get_user_leagues(tokens, client.clone()).await?;
+
+    let mut league_keys = Vec::new();
+
+    leagues_info.nba.iter().for_each(|league| league_keys.push(&league.league_key));
+    leagues_info.nfl.iter().for_each(|league| league_keys.push(&league.league_key));
+    leagues_info.nhl.iter().for_each(|league| league_keys.push(&league.league_key));
+
+    let mut stats = LeagueStats {
+        nfl: Vec::new(),
+        nba: Vec::new(),
+        nhl: Vec::new(),
+    };
+
+    let mut new_tokens: Option<(String, String)> = None;
+
+    for league_key in league_keys {
+        let tokens_to_use = if let Some(tkns) = new_tokens.clone() {
+            let mut tokens_clone = tokens.clone();
+            tokens_clone.access_token = tkns.0;
+            tokens_clone.refresh_token = Some(tkns.1);
+
+            tokens_clone
+        } else {
+            tokens.clone()
+        };
+
+        let (league_data, opt_tokens) = make_request(&format!("/league/{league_key}/settings"), client.clone(), &tokens_to_use, 2).await?;
+
+        if let Some(t) = opt_tokens {
+            new_tokens = Some(t);
+        }
+        
+        let cleaned: xml_settings::FantasyContent = serde_xml_rs::from_str(&league_data)?;
+        let game_code = cleaned.league.game_code;
+        let stat = cleaned.league.settings.stat_categories.stats.stat;
+
+        match game_code.as_str() {
+            "nfl" => stats.nfl.push(stat),
+            "nba" => stats.nba.push(stat),
+            "nhl" => stats.nhl.push(stat),
+            _ => ()
+        }
+    }
+
+    return Ok((stats, new_tokens));
 }

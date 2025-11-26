@@ -12,7 +12,7 @@ use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::set_header::SetRequestHeaderLayer;
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
+use yahoo_fantasy::{api::{debug_league_stats, get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -62,6 +62,7 @@ async fn main() {
         .route("/yahoo/leagues", get(user_leagues))
         .route("/yahoo/league/{league_key}/standings", get(league_standings))
         .route("/yahoo/team/{teamKey}/roster", get(team_roster))
+        .route("/yahoo/debug/stats", get(get_debug_league_stats))
         .route("/health", get(|| async { "Hello, World!" }))
         .layer(
             SetRequestHeaderLayer::if_not_present(
@@ -208,7 +209,7 @@ async fn user_leagues(jar: CookieJar, State(web_state): State<ServerState>, head
 
     let initial_tokens = token_option.unwrap();
 
-    let response = get_user_leagues(&initial_tokens, web_state.client, "nfl").await;
+    let response = get_user_leagues(&initial_tokens, web_state.client).await;
 
     if let Err(e) = response {
         error!("Error fetching leagues for user: {e}");
@@ -262,7 +263,7 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
     fn create_response<T>(roster_vec: Vec<Roster<T>>, jar: CookieJar, new_tokens: Option<(String, String)>, inital_tokens: Tokens) -> Response 
     where 
         T: StatDecode + std::fmt::Display + serde::Serialize,
-        <T as TryFrom<u8>>::Error: std::fmt::Display
+        <T as TryFrom<u32>>::Error: std::fmt::Display
     {
         let mut headers = HeaderMap::new();
         let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &inital_tokens.access_type);
@@ -276,25 +277,25 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
 
     let result = match query.sport.as_str() {
         "nfl" | "football" => {
-            let response = get_team_roster::<FootballStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
+            let response = get_team_roster::<FootballStats>(&team_key, web_state.client.clone(), &initial_tokens, query.date.clone()).await;
             match response {
-                Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
+                Ok((roster, new_tokens)) => Ok(create_response(roster, jar.clone(), new_tokens, initial_tokens.clone())),
                 Err(e) => Err(e)
             }
         }
 
         "nba" | "basketball" => {
-            let response = get_team_roster::<BasketballStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
+            let response = get_team_roster::<BasketballStats>(&team_key, web_state.client.clone(), &initial_tokens, query.date.clone()).await;
             match response {
-                Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
+                Ok((roster, new_tokens)) => Ok(create_response(roster, jar.clone(), new_tokens, initial_tokens.clone())),
                 Err(e) => Err(e)
             }
         }
 
         "nhl" | "hockey" => {
-            let response = get_team_roster::<HockeyStats>(&team_key, web_state.client, &initial_tokens, query.date.clone()).await;
+            let response = get_team_roster::<HockeyStats>(&team_key, web_state.client.clone(), &initial_tokens, query.date.clone()).await;
             match response {
-                Ok((roster, new_tokens)) => Ok(create_response(roster, jar, new_tokens, initial_tokens)),
+                Ok((roster, new_tokens)) => Ok(create_response(roster, jar.clone(), new_tokens, initial_tokens.clone())),
                 Err(e) => Err(e)
             }
         }
@@ -306,13 +307,90 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
     };
 
     if let Err(e) = result {
+        let error_msg = e.to_string();
+
+        // Check if this is a sport validation error and auto-retry with correct sport
+        if error_msg.contains("Sport validation failed") {
+            // Extract the correct sport from the URL in the error message
+            let correct_sport = if error_msg.contains("football.fantasysports.yahoo.com") {
+                Some("football")
+            } else if error_msg.contains("basketball.fantasysports.yahoo.com") {
+                Some("basketball")
+            } else if error_msg.contains("hockey.fantasysports.yahoo.com") {
+                Some("hockey")
+            } else {
+                None
+            };
+
+            if let Some(sport) = correct_sport {
+                warn!("Sport mismatch detected. Auto-retrying with correct sport: {}", sport);
+
+                // Retry with the correct sport
+                let retry_result = match sport {
+                    "football" => {
+                        get_team_roster::<FootballStats>(&team_key, web_state.client, &initial_tokens, query.date).await
+                            .map(|(roster, new_tokens)| create_response(roster, jar, new_tokens, initial_tokens))
+                    }
+                    "basketball" => {
+                        get_team_roster::<BasketballStats>(&team_key, web_state.client, &initial_tokens, query.date).await
+                            .map(|(roster, new_tokens)| create_response(roster, jar, new_tokens, initial_tokens))
+                    }
+                    "hockey" => {
+                        get_team_roster::<HockeyStats>(&team_key, web_state.client, &initial_tokens, query.date).await
+                            .map(|(roster, new_tokens)| create_response(roster, jar, new_tokens, initial_tokens))
+                    }
+                    _ => unreachable!()
+                };
+
+                return match retry_result {
+                    Ok(mut response) => {
+                        // Add a warning header to inform the client about the auto-correction
+                        let headers = response.headers_mut();
+                        let _ = headers.insert(
+                            "X-Sport-Auto-Corrected",
+                            HeaderValue::from_str(&format!("Requested '{}' but team plays '{}'", query.sport, sport)).unwrap_or(HeaderValue::from_static("true"))
+                        );
+                        response
+                    }
+                    Err(retry_err) => {
+                        error!("Retry failed for {team_key} with correct sport {sport}: {retry_err}");
+                        StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    }
+                };
+            }
+
+            // If we couldn't detect the sport, return the validation error
+            return ErrorCodeResponse::new(
+                StatusCode::BAD_REQUEST,
+                &error_msg
+            );
+        }
+
         error!("Error fetching roster for {team_key}: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let final_response = result.unwrap();
+    result.unwrap()
+}
 
-    final_response
+async fn get_debug_league_stats(jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
+    if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
+
+    let initial_tokens = token_option.unwrap();
+
+    let response = debug_league_stats(web_state.client, &initial_tokens).await;
+
+    if let Err(e) = response {
+        error!("Error fetching league_stats: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let (stats, new_tokens) = response.unwrap();
+    let mut headers = HeaderMap::new();
+    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
+
+    (headers, updated_cookies, Json(stats)).into_response()
 }
 
 async fn finance_health(State(web_state): State<ServerState>) -> impl IntoResponse {

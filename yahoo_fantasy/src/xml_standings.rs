@@ -43,10 +43,10 @@ pub struct TeamLogo {
 #[derive(Debug, Deserialize)]
 pub struct TeamStandings {
     #[serde(default)]
-    pub games_back: Option<f32>,
+    pub games_back: Option<String>,
     pub outcome_totals: OutcomeTotals,
-    pub points_for: f32,
-    pub points_against: f32,
+    pub points_for: Option<String>,
+    pub points_against: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
