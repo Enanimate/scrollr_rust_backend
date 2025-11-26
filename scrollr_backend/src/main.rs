@@ -1,4 +1,4 @@
-use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc};
+use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc, time::{Duration, Instant}};
 
 use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
@@ -6,6 +6,7 @@ use finance_service::{start_finance_services, types::FinanceState, update_all_pr
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
 use scrollr_backend::{ErrorCodeResponse, RefreshBody, SchedulePayload, ServerState, get_access_token, update_tokens};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sports_service::{frequent_poll, start_sports_service};
@@ -25,34 +26,15 @@ async fn main() {
         Err(e) => eprintln!("Failed to set logger: {}", e)
     }
 
-    let domain_name = env::var("DOMAIN_NAME").expect("Domain name needs to be specified in .env!");
-    let contact_email = env::var("CONTACT_EMAIL").expect("Contact email needs to be specified in .env!");
+    // Check if ACME should be enabled (defaults to true for backwards compatibility)
+    let acme_enabled = env::var("ACME_ENABLED")
+        .unwrap_or_else(|_| "true".to_string())
+        .to_lowercase() == "true";
+
     let web_state = ServerState::new().await;
 
     handles.push(tokio::spawn(start_finance_services(web_state.db_pool.clone(), Arc::clone(&web_state.finance_health))));
     handles.push(tokio::spawn(start_sports_service(web_state.db_pool.clone())));
-
-    let cache_dir = PathBuf::from("./acme_cache");
-
-    let mut state = AcmeConfig::new(vec![domain_name])
-        .contact(vec![format!("mailto:{}", contact_email)])
-        .cache_option(Some(cache_dir).map(DirCache::new))
-        .directory_lets_encrypt(true)
-        .state();
-
-    let rustls_config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_cert_resolver(state.resolver());
-    let acceptor = state.axum_acceptor(Arc::new(rustls_config));
-
-    tokio::spawn(async move {
-        loop {
-            match state.next().await.expect("ACME Error") {
-                Ok(ok) => info!("event: {ok:?}"),
-                Err(err) => error!("error: {err:?}"),
-            }
-        }
-    });
 
     let app = Router::new()
         .route("/", post(handler))
@@ -73,16 +55,52 @@ async fn main() {
         .with_state(web_state);
 
     let ipv4_addr = Ipv4Addr::from([0, 0, 0, 0]);
-
     let addr = SocketAddr::new(IpAddr::V4(ipv4_addr), 8443);
 
     info!("Listening on address: {addr}");
 
-    axum_server::bind(addr)
-        .acceptor(acceptor)
-        .serve(app.into_make_service())
-        .await
-        .expect("Failed to bind to port");
+    if acme_enabled {
+        info!("ACME certificate acquisition enabled");
+        let domain_name = env::var("DOMAIN_NAME").expect("DOMAIN_NAME must be set when ACME_ENABLED=true");
+        let contact_email = env::var("CONTACT_EMAIL").expect("CONTACT_EMAIL must be set when ACME_ENABLED=true");
+        let cache_dir = PathBuf::from("./acme_cache");
+
+        let mut state = AcmeConfig::new(vec![domain_name])
+            .contact(vec![format!("mailto:{}", contact_email)])
+            .cache_option(Some(cache_dir).map(DirCache::new))
+            .directory_lets_encrypt(true)
+            .state();
+
+        let rustls_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(state.resolver());
+        let acceptor = state.axum_acceptor(Arc::new(rustls_config));
+
+        tokio::spawn(async move {
+            loop {
+                match state.next().await.expect("ACME Error") {
+                    Ok(ok) => info!("event: {ok:?}"),
+                    Err(err) => error!("error: {err:?}"),
+                }
+            }
+        });
+
+        axum_server::bind(addr)
+            .acceptor(acceptor)
+            .serve(app.into_make_service())
+            .await
+            .expect("Failed to bind to port");
+    } else {
+        info!("ACME certificate acquisition disabled - running without TLS (ensure reverse proxy handles HTTPS)");
+
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .expect("Failed to bind to port");
+
+        axum::serve(listener, app)
+            .await
+            .expect("Failed to start server");
+    }
 
     join_all(handles).await;
 
@@ -104,8 +122,21 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
             info!("Starting frequent polling for the following leagues {:?}", payload.data);
             let mut leagues = Vec::new();
 
-            let file_contents = fs::read_to_string("./configs/leagues.json").unwrap();
-            let leagues_to_ingest: Vec<LeagueConfigs> = serde_json::from_str(&file_contents).unwrap();
+            let file_contents = match fs::read_to_string("./configs/leagues.json") {
+                Ok(contents) => contents,
+                Err(e) => {
+                    error!("Failed to read leagues config file: {e}");
+                    return;
+                }
+            };
+
+            let leagues_to_ingest: Vec<LeagueConfigs> = match serde_json::from_str(&file_contents) {
+                Ok(leagues) => leagues,
+                Err(e) => {
+                    error!("Failed to parse leagues config JSON: {e}");
+                    return;
+                }
+            };
 
             for league in leagues_to_ingest {
                 if payload.data.contains(&league.name) {
@@ -119,18 +150,34 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
     }
 }
 
-async fn get_yahoo_handler(State(mut web_state): State<ServerState>) -> Response {
-    let result = yahoo(web_state.client_id, web_state.client_secret, web_state.yahoo_callback.clone())
-        .await
-        .inspect_err(|e| error!("Yahoo Error: {e}"));
+#[axum::debug_handler]
+async fn get_yahoo_handler(State(web_state): State<ServerState>) -> Response {
+    // Clean up expired CSRF tokens
+    web_state.cleanup_expired_csrf_tokens().await;
 
-    let (redirect_url, csref_token) = result.unwrap();
-    web_state.csref_token = Some(csref_token);
+    // Clone values to avoid holding borrows across await points
+    let client_id = web_state.client_id.clone();
+    let client_secret = web_state.client_secret.expose_secret().to_string();
+    let callback_url = web_state.yahoo_callback.clone();
+
+    let (redirect_url, csrf_token) = match yahoo(client_id, client_secret, callback_url).await {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Yahoo auth initiation failed: {e}");
+            return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to initiate authentication");
+        }
+    };
+
+    // Store CSRF token with timestamp
+    {
+        let mut csrf_tokens = web_state.csrf_tokens.lock().await;
+        csrf_tokens.insert(csrf_token.clone(), Instant::now());
+    }
 
     let mut response = Redirect::temporary(&redirect_url).into_response();
 
     response.headers_mut().insert(
-        REFERRER_POLICY, 
+        REFERRER_POLICY,
         HeaderValue::from_static("no-referrer")
     );
 
@@ -144,16 +191,49 @@ struct CodeResponse {
 }
 
 async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): State<ServerState>, jar: CookieJar) -> Response {
-    let tokens_option = exchange_for_token(tokens.code, web_state.client_id, web_state.client_secret, tokens.state, web_state.yahoo_callback).await;
-    if tokens_option.is_none() { return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve tokens"); }
+    // Validate CSRF token
+    {
+        let mut csrf_tokens = web_state.csrf_tokens.lock().await;
 
-    let tokens = tokens_option.unwrap();
-    let access_token = tokens.access_token;
-    let refresh_token = if let Some(token) = tokens.refresh_token {
-        token
-    } else {
-        String::new()
+        // Check if token exists
+        if let Some(created_at) = csrf_tokens.remove(&tokens.state) {
+            // Check if token is not expired (10 minutes)
+            let now = Instant::now();
+            if now.duration_since(created_at) > Duration::from_secs(600) {
+                return ErrorCodeResponse::new(StatusCode::BAD_REQUEST, "CSRF token expired");
+            }
+        } else {
+            error!("Invalid CSRF token received: {}", tokens.state);
+            return ErrorCodeResponse::new(StatusCode::BAD_REQUEST, "Invalid CSRF token");
+        }
+    }
+
+    // Clone values to avoid holding borrows across await points
+    let client_id = web_state.client_id.clone();
+    let client_secret = web_state.client_secret.expose_secret().to_string();
+    let callback_url = web_state.yahoo_callback.clone();
+
+    let tokens_option = exchange_for_token(
+        tokens.code,
+        client_id,
+        client_secret,
+        tokens.state,
+        callback_url
+    ).await;
+
+    let tokens = match tokens_option {
+        Some(t) => t,
+        None => {
+            error!("Failed to exchange authorization code for tokens");
+            return ErrorCodeResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retrieve tokens");
+        }
     };
+
+    let access_token = tokens.access_token.expose_secret().to_string();
+    let refresh_token = tokens.refresh_token
+        .as_ref()
+        .map(|t| t.expose_secret().to_string())
+        .unwrap_or_default();
 
     let cookie_auth = Cookie::build(("yahoo-auth", access_token.clone()))
         .path("/yahoo")

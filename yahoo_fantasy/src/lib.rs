@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use oauth2::{AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest::Client};
+use secrecy::{SecretString, ExposeSecret};
 use utils::log::error;
 
 use crate::types::Tokens;
@@ -57,30 +58,30 @@ pub async fn exchange_for_token(authorization_code: String, client_id: String, c
     let tokens = token_result.unwrap();
     let access_token = tokens.access_token();
     let refresh_token = if let Some(token) = tokens.refresh_token() {
-        Some(token.clone().into_secret())
+        Some(SecretString::new(token.clone().into_secret().into_boxed_str()))
     } else {
         None
     };
 
-    return Some(Tokens {
-        access_token: access_token.clone().into_secret(),
-        refresh_token: refresh_token,
-        client_id,
-        client_secret,
+    Some(Tokens {
+        access_token: SecretString::new(access_token.clone().into_secret().into_boxed_str()),
+        refresh_token,
+        client_id: client_id.clone(),
+        client_secret: SecretString::new(client_secret.into_boxed_str()),
         callback_url,
         access_type: String::new(),
-    });
+    })
 }
 
-pub(crate) async fn exchange_refresh(client_id: String, client_secret: String, callback_url: String, old_refresh_token: String) -> Result<(String, String), Box<dyn Error>> {
+pub(crate) async fn exchange_refresh(client_id: String, client_secret: SecretString, callback_url: String, old_refresh_token: SecretString) -> Result<(String, String), Box<dyn Error>> {
     let client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
+        .set_client_secret(ClientSecret::new(client_secret.expose_secret().to_string()))
         .set_auth_uri(AuthUrl::new(AUTH_URL.to_string())?)
         .set_token_uri(TokenUrl::new(TOKEN_URL.to_string())?)
         .set_redirect_uri(RedirectUrl::new(callback_url)?);
 
     let http_client = Client::new();
-    let refresh_token = RefreshToken::new(old_refresh_token);
+    let refresh_token = RefreshToken::new(old_refresh_token.expose_secret().to_string());
 
     let token_result = client
         .exchange_refresh_token(&refresh_token)
@@ -91,9 +92,7 @@ pub(crate) async fn exchange_refresh(client_id: String, client_secret: String, c
 
     let new_refresh_token = match token_result.refresh_token() {
         Some(t) => t.secret().to_string(),
-        None => {
-            refresh_token.secret().to_string()
-        }
+        None => refresh_token.secret().to_string(),
     };
 
     Ok((new_access_token, new_refresh_token))

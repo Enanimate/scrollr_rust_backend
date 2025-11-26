@@ -1,8 +1,10 @@
-use std::{env, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc, time::{Duration, Instant}};
 
 use axum::{Json, http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION}, response::{IntoResponse, Response}};
 use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use finance_service::types::FinanceHealth;
+use secrecy::SecretString;
+pub use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use utils::{database::{PgPool, initialize_pool}, log::warn};
@@ -35,9 +37,9 @@ pub struct SchedulePayload {
 pub struct ServerState {
     pub db_pool: Arc<PgPool>,
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: SecretString,
     pub yahoo_callback: String,
-    pub csref_token: Option<String>,
+    pub csrf_tokens: Arc<Mutex<HashMap<String, Instant>>>,
     pub client: Client,
 
     pub finance_health: Arc<Mutex<FinanceHealth>>,
@@ -48,13 +50,24 @@ impl ServerState {
         Self {
             db_pool: Arc::new(initialize_pool().await.expect("Failed to initialize database pool")),
             client_id: env::var("YAHOO_CLIENT_ID").expect("Yahoo client ID must be set in .env"),
-            client_secret: env::var("YAHOO_CLIENT_SECRET").expect("Yahoo client secret must be set in .env"),
+            client_secret: SecretString::new(
+                env::var("YAHOO_CLIENT_SECRET")
+                    .expect("Yahoo client secret must be set in .env")
+                    .into_boxed_str()
+            ),
             yahoo_callback: format!("https://{}{}", env::var("DOMAIN_NAME").unwrap(), env::var("YAHOO_CALLBACK_URL").expect("Yahoo callback URL must be set in .env")),
-            csref_token: None,
+            csrf_tokens: Arc::new(Mutex::new(HashMap::new())),
             client: Client::new(),
 
             finance_health: Arc::new(Mutex::new(FinanceHealth::new())),
         }
+    }
+
+    /// Clean up expired CSRF tokens (older than 10 minutes)
+    pub async fn cleanup_expired_csrf_tokens(&self) {
+        let mut tokens = self.csrf_tokens.lock().await;
+        let now = Instant::now();
+        tokens.retain(|_, created_at| now.duration_since(*created_at) < Duration::from_secs(600));
     }
 }
 
@@ -84,10 +97,10 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerSta
             };
 
             return Some(Tokens {
-                access_token: fixed_token.to_string(),
-                refresh_token: refresh,
+                access_token: SecretString::new(fixed_token.to_string().into_boxed_str()),
+                refresh_token: refresh.map(|s| SecretString::new(s.into_boxed_str())),
                 client_id: web_state.client_id,
-                client_secret: web_state.client_secret,
+                client_secret: web_state.client_secret.clone(),
                 callback_url: web_state.yahoo_callback,
                 access_type: String::from("header")
             });
@@ -106,10 +119,10 @@ pub fn get_access_token(jar: CookieJar, headers: HeaderMap, web_state: ServerSta
             };
 
             return Some(Tokens {
-                access_token: token.to_string(),
-                refresh_token: refresh,
+                access_token: SecretString::new(token.to_string().into_boxed_str()),
+                refresh_token: refresh.map(|s| SecretString::new(s.into_boxed_str())),
                 client_id: web_state.client_id,
-                client_secret: web_state.client_secret,
+                client_secret: web_state.client_secret.clone(),
                 callback_url: web_state.yahoo_callback,
                 access_type: String::from("cookie")
             });

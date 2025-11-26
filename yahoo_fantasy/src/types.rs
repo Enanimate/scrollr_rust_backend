@@ -1,13 +1,14 @@
 use serde::Serialize;
+use secrecy::SecretString;
 
 use crate::{stats::StatDecode, xml_roster::{self, PlayerPoints}};
 
 #[derive(Clone)]
 pub struct Tokens {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
+    pub access_token: SecretString,
+    pub refresh_token: Option<SecretString>,
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: SecretString,
     pub callback_url: String,
     pub access_type: String,
 }

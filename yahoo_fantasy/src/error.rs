@@ -1,4 +1,5 @@
 use std::error::Error;
+use secrecy::SecretString;
 use serde::Deserialize;
 use utils::log::error;
 
@@ -26,7 +27,7 @@ impl std::fmt::Display for YahooError {
 impl Error for YahooError {}
 
 impl YahooError {
-    pub async fn check_response(response: String, client_id: String, client_secret: String, callback_url: String, refresh_token: Option<String>) -> YahooError {
+    pub async fn check_response(response: String, client_id: String, client_secret: SecretString, callback_url: String, refresh_token: Option<SecretString>) -> YahooError {
         let cleaned = serde_xml_rs::from_str::<YahooErrorResponse>(&response);
 
         match cleaned {
@@ -36,8 +37,13 @@ impl YahooError {
 
                 if &error_type == "token_expired" {
                     if let Some(token) = refresh_token {
-                        let (a, b) = exchange_refresh(client_id, client_secret, callback_url, token).await.unwrap();
-                        return Self::NewTokens(a, b);
+                        match exchange_refresh(client_id, client_secret, callback_url, token).await {
+                            Ok((a, b)) => return Self::NewTokens(a, b),
+                            Err(e) => {
+                                error!("Failed to refresh token: {e}");
+                                return Self::Failed;
+                            }
+                        }
                     } else {
                         return Self::Failed;
                     }
@@ -55,7 +61,10 @@ impl YahooError {
         if let Some((_description, pairs)) = message.split_once(" OAuth ") {
             if let Some((error, _realm)) = pairs.split_once(',') {
                 if let Some((key, value)) = error.split_once('=') {
-                    let trimmed_value = value.strip_prefix('"').unwrap().strip_suffix('"').unwrap();
+                    let trimmed_value = value
+                        .strip_prefix('"')
+                        .and_then(|s| s.strip_suffix('"'))
+                        .unwrap_or(value);
                     match key {
                         "oauth_problem" => {
                             match trimmed_value {

@@ -1,5 +1,6 @@
 use anyhow::{Context, anyhow};
 pub use oauth2::{http::header, reqwest::Client};
+use secrecy::{ExposeSecret, SecretString};
 use utils::log::{error, info};
 
 use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_settings::{self}, xml_standings};
@@ -13,7 +14,7 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
         let access_token = if let Some(ref token) = new_tokens {
             token.0.clone()
         } else {
-            tokens.access_token.clone()
+            tokens.access_token.expose_secret().to_string()
         };
 
         let url = format!("{YAHOO_BASE_API}{endpoint}");
@@ -198,8 +199,8 @@ pub async fn debug_league_stats(client: Client, tokens: &Tokens) -> anyhow::Resu
     for league_key in league_keys {
         let tokens_to_use = if let Some(tkns) = new_tokens.clone() {
             let mut tokens_clone = tokens.clone();
-            tokens_clone.access_token = tkns.0;
-            tokens_clone.refresh_token = Some(tkns.1);
+            tokens_clone.access_token = SecretString::new(tkns.0.into_boxed_str());
+            tokens_clone.refresh_token = Some(SecretString::new(tkns.1.into_boxed_str()));
 
             tokens_clone
         } else {
