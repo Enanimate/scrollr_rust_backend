@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
-use tower_http::set_header::SetRequestHeaderLayer;
+use tower_http::{cors::{self, AllowOrigin, CorsLayer}, set_header::SetRequestHeaderLayer};
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
 use yahoo_fantasy::{api::{debug_league_stats, get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
@@ -53,6 +53,14 @@ async fn main() {
                 header::HeaderName::from_static("x-frame-options"),
                 HeaderValue::from_static("DENY")
             )
+        )
+        .layer(
+            CorsLayer::new()
+                .allow_methods(cors::Any)
+                .allow_headers(cors::Any)
+                .allow_origin(AllowOrigin::list([
+                    "https://www.myscrollr.com".parse().unwrap(),
+                ]))
         )
         .with_state(web_state);
 
