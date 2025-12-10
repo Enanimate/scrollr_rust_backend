@@ -2,9 +2,11 @@ use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, s
 
 use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
+use axum_server::tls_rustls::RustlsConfig;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
 use futures_util::{StreamExt, future::join_all};
 use dotenv::dotenv;
+use rcgen::generate_simple_self_signed;
 use scrollr_backend::{ErrorCodeResponse, RefreshBody, SchedulePayload, ServerState, get_access_token, update_tokens};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -58,10 +60,10 @@ async fn main() {
     let addr = SocketAddr::new(IpAddr::V4(ipv4_addr), 8443);
 
     info!("Listening on address: {addr}");
+    let domain_name = env::var("DOMAIN_NAME").expect("DOMAIN_NAME must be set");
 
     if acme_enabled {
         info!("ACME certificate acquisition enabled");
-        let domain_name = env::var("DOMAIN_NAME").expect("DOMAIN_NAME must be set when ACME_ENABLED=true");
         let contact_email = env::var("CONTACT_EMAIL").expect("CONTACT_EMAIL must be set when ACME_ENABLED=true");
         let cache_dir = PathBuf::from("./acme_cache");
 
@@ -91,13 +93,24 @@ async fn main() {
             .await
             .expect("Failed to bind to port");
     } else {
-        info!("ACME certificate acquisition disabled - running without TLS (ensure reverse proxy handles HTTPS)");
+        info!("ACME certificate acquisition disabled - using self-signed certificates");
 
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .expect("Failed to bind to port");
+        let subject_alt_names = vec![domain_name.clone(), "localhost".to_string(), "127.0.0.1".to_string()];
+        let cert_key = generate_simple_self_signed(subject_alt_names)
+            .expect("Failed to generate self-signed certificate");
 
-        axum::serve(listener, app)
+        let cert_pem = cert_key.cert.pem();
+        let key_pem = cert_key.key_pair.serialize_pem();
+
+        let rustls_config = RustlsConfig::from_pem(
+            cert_pem.as_bytes().to_vec(), 
+            key_pem.as_bytes().to_vec()
+        )
+        .await
+        .expect("Failed to create rustls config");
+
+        axum_server::bind_rustls(addr, rustls_config)
+            .serve(app.into_make_service())
             .await
             .expect("Failed to start server");
     }
@@ -268,7 +281,7 @@ async fn yahoo_callback(Query(tokens): Query<CodeResponse>, State(web_state): St
                         console.error("Error sending token via postMessage:", e);
                     }}
                     // Always close the popup window after a brief delay
-                    setTimeout(function(){{ window.close(); }}, 100);
+                    setTimeout(function(){{ window.close(); }}, 1500);
                 }})();
                 </script>
                 <p>Authentication successful. You can close this window.</p>

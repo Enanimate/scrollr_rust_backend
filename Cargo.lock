@@ -1897,6 +1897,19 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
+dependencies = [
+ "pem",
+ "ring",
+ "rustls-pki-types",
+ "time",
+ "yasna",
+]
+
+[[package]]
+name = "rcgen"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fae430c6b28f1ad601274e78b7dffa0546de0b73b4cd32f46723c0c2a16f7a5"
@@ -2136,6 +2149,7 @@ dependencies = [
  "dotenv",
  "finance_service",
  "futures-util",
+ "rcgen 0.13.2",
  "rustls",
  "secrecy",
  "serde",
@@ -2804,7 +2818,7 @@ dependencies = [
  "num-bigint",
  "pem",
  "proc-macro2",
- "rcgen",
+ "rcgen 0.14.5",
  "reqwest",
  "ring",
  "rustls",
