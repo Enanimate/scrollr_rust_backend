@@ -117,7 +117,8 @@ sport=<sport>			// This is required
                         // nba or basketball,
                         // nhl or hockey,
                         
-date=<year-month-day>	// Optional
+date=<year-month-day>	// Optional, date is not always allowed by the Yahoo API if that is the case
+						// the back end server will automatically retry the request without a date.
 ```
 
 Authentication

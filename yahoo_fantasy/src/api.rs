@@ -9,6 +9,7 @@ pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fan
 
 pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens, mut retries_allowed: u8) -> anyhow::Result<(String, Option<(String, String)>)> {
     let mut new_tokens: Option<(String, String)> = None;
+    let mut roster_date = true;
 
     while retries_allowed > 0 {
         let access_token = if let Some(ref token) = new_tokens {
@@ -17,7 +18,23 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
             tokens.access_token.expose_secret().to_string()
         };
 
-        let url = format!("{YAHOO_BASE_API}{endpoint}");
+        let use_endpoint = if roster_date == false {
+            let cleaned_endpoint = if let Some(semicolon_pos) = endpoint.find(';') {
+                if let Some(slash_pos) = endpoint[semicolon_pos..].find('/') {
+                    format!("{}{}", &endpoint[..semicolon_pos], &endpoint[semicolon_pos + slash_pos..])
+                } else {
+                    endpoint.to_string()
+                }
+            } else {
+                endpoint.to_string()
+            };
+
+            cleaned_endpoint
+        } else {
+            endpoint.to_string()
+        };
+
+        let url = format!("{YAHOO_BASE_API}{use_endpoint}");
         let response = client.get(&url)
             .bearer_auth(access_token)
             .header(header::ACCEPT, "application/xml")
@@ -34,7 +51,14 @@ pub(crate) async fn make_request(endpoint: &str, client: Client, tokens: &Tokens
             YahooError::Ok => return Ok((response, new_tokens)),
             YahooError::NewTokens(a, b) => new_tokens = Some((a, b)),
             YahooError::Failed => return Err(anyhow!("Request failed and could not be recovered")),
-            YahooError::Error(e) => info!("{e}"),
+            YahooError::Error(e) => {
+                info!("{e}");
+
+                match e.as_str() {
+                    "date unsupported" => roster_date = false,
+                    _ => info!("{e}"),
+                }
+            },
         }
     }
 

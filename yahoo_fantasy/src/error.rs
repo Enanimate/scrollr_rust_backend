@@ -28,11 +28,14 @@ impl Error for YahooError {}
 
 impl YahooError {
     pub async fn check_response(response: String, client_id: String, client_secret: SecretString, callback_url: String, refresh_token: Option<SecretString>) -> YahooError {
-        let cleaned = serde_xml_rs::from_str::<YahooErrorResponse>(&response);
+        let cleaned = serde_xml_rs::from_str::<YahooNamespacedErrorResponse>(&response)
+            .map(|e| e.description)
+            // If that fails, try without namespace (regular API errors)
+            .or_else(|_| serde_xml_rs::from_str::<YahooErrorResponse>(&response).map(|e| e.description));
 
         match cleaned {
             Ok(error) => {
-                let raw_msg = error.description;
+                let raw_msg = error;
                 let error_type = Self::handle_checks(raw_msg);
 
                 if &error_type == "token_expired" {
@@ -47,6 +50,8 @@ impl YahooError {
                     } else {
                         return Self::Failed;
                     }
+                } else if error_type.contains("This game does not support accessing a roster by date") {
+                    return Self::Error("date unsupported".to_string())
                 } else {
                     return Self::Error(error_type);
                 }
@@ -58,6 +63,7 @@ impl YahooError {
     }
 
     fn handle_checks(message: String) -> String {
+        // Check if it's an OAuth error message
         if let Some((_description, pairs)) = message.split_once(" OAuth ") {
             if let Some((error, _realm)) = pairs.split_once(',') {
                 if let Some((key, value)) = error.split_once('=') {
@@ -84,13 +90,21 @@ impl YahooError {
             }
         }
 
-        return "Missing error message from Yahoo!".to_string();
+        // If not an OAuth error, return the raw message (regular API error)
+        message
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename = "yahoo:error")]
-struct YahooErrorResponse {
+struct YahooNamespacedErrorResponse {
     #[serde(rename = "yahoo:description")]
+    description: String,
+}
+
+// For regular API errors without namespace
+#[derive(Debug, Deserialize)]
+#[serde(rename = "error")]
+struct YahooErrorResponse {
     description: String,
 }

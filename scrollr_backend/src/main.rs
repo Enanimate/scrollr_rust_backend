@@ -1,6 +1,6 @@
 use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc, time::{Duration, Instant}};
 
-use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, AUTHORIZATION, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use axum_server::tls_rustls::RustlsConfig;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
@@ -57,9 +57,11 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_methods(cors::Any)
-                .allow_headers(cors::Any)
+                .allow_headers([
+                    AUTHORIZATION
+                ])
                 .allow_origin(AllowOrigin::list([
-                    "https://www.myscrollr.com".parse().unwrap(),
+                    "https://myscrollr.com".parse().unwrap(),
                 ]))
         )
         .with_state(web_state);
