@@ -154,7 +154,7 @@ where
     pub is_undroppable: bool,
     pub position_type: String,
     pub player_stats: PlayerStats<T>,
-    pub player_points: PlayerPoints,
+    pub player_points: Option<PlayerPoints>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,7 +236,7 @@ where
 
         let parsed_value = temp.value.parse::<u32>()
             .unwrap_or_else(|e| {
-                if temp.value == "-" {
+                if temp.value == "-" || temp.value == "-/-" {
                     0
                 } else {
                     warn!("Stat value parsing failed for ID {}: {} (Defaulting to 0) value: {}", temp.raw_id, e, temp.value);

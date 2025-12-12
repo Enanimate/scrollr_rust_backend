@@ -44,7 +44,7 @@ pub struct TeamLogo {
 pub struct TeamStandings {
     #[serde(default)]
     pub games_back: Option<String>,
-    pub outcome_totals: OutcomeTotals,
+    pub outcome_totals: Option<OutcomeTotals>,
     pub points_for: Option<String>,
     pub points_against: Option<String>,
 }

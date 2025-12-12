@@ -1,6 +1,6 @@
 use std::{env, fs::{self}, net::{IpAddr, Ipv4Addr, SocketAddr}, path::PathBuf, sync::Arc, time::{Duration, Instant}};
 
-use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, AUTHORIZATION, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
+use axum::{Json, Router, extract::{Path, Query, State}, http::{HeaderMap, HeaderValue, StatusCode, header::{self, REFERRER_POLICY}}, response::{Html, IntoResponse, Redirect, Response}, routing::{get, post}};
 use axum_extra::extract::{CookieJar, cookie::{Cookie, SameSite}};
 use axum_server::tls_rustls::RustlsConfig;
 use finance_service::{start_finance_services, types::FinanceState, update_all_previous_closes};
@@ -43,9 +43,9 @@ async fn main() {
         .route("/finance/health", get(finance_health))
         .route("/yahoo/start", get(get_yahoo_handler))
         .route("/yahoo/callback", get(yahoo_callback))
-        .route("/yahoo/leagues", get(user_leagues))
-        .route("/yahoo/league/{league_key}/standings", get(league_standings))
-        .route("/yahoo/team/{teamKey}/roster", get(team_roster))
+        .route("/yahoo/leagues", get(user_leagues).post(user_leagues))
+        .route("/yahoo/league/{league_key}/standings", get(league_standings).post(league_standings))
+        .route("/yahoo/team/{teamKey}/roster", get(team_roster).post(team_roster))
         .route("/yahoo/debug/stats", get(get_debug_league_stats))
         .route("/health", get(|| async { "Hello, World!" }))
         .layer(
@@ -57,11 +57,11 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_methods(cors::Any)
-                .allow_headers([
-                    AUTHORIZATION
-                ])
+                .allow_headers(cors::Any)
                 .allow_origin(AllowOrigin::list([
                     "https://myscrollr.com".parse().unwrap(),
+                    "https://dev.olvyx.com".parse().unwrap(),
+                    "https://api.enanimate.dev".parse().unwrap(),
                 ]))
         )
         .with_state(web_state);
@@ -426,7 +426,7 @@ async fn team_roster(Query(query): Query<RosterQuery>, Path(team_key): Path<Stri
             };
 
             if let Some(sport) = correct_sport {
-                warn!("Sport mismatch detected. Auto-retrying with correct sport: {}", sport);
+                warn!("Sport mismatch detected. Auto-retrying with correct sport: {}, team_key: {}", sport, team_key);
 
                 // Retry with the correct sport
                 let retry_result = match sport {

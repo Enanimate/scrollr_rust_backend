@@ -78,7 +78,11 @@ pub async fn get_user_leagues(tokens: &Tokens, client: Client) -> anyhow::Result
     let games = users[0].games.game.clone();
 
     for game in games {
-        let league_data = game.leagues.league.clone();
+        let league_data = if let Some(leagues) = game.leagues {
+            leagues.league.clone()
+        } else {
+            continue;
+        };
 
         for league in league_data {
             let user_league = UserLeague {
@@ -129,7 +133,22 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
         let team_standings = team.team_standings;
         let outcome_total = team_standings.outcome_totals;
 
-        let percentage = outcome_total.percentage.unwrap_or_else(|| "0.0".to_string());
+        let (wins, losses, ties, percentage) = if let Some(totals) = outcome_total {
+            (
+                totals.wins,
+                totals.losses,
+                totals.ties,
+                totals.percentage.unwrap_or_else(|| "0.0".to_string())
+            )
+        } else {
+            (
+                0,
+                0,
+                0,
+                "0.0".to_string()
+            )
+        };
+
         let games_back = team_standings.games_back.unwrap_or("0.0".to_string());
         standings.push(
             LeagueStandings {
@@ -138,10 +157,10 @@ pub async fn get_league_standings(league_key: &str, client: Client, tokens: &Tok
                 name: team.name,
                 url: team.url,
                 team_logo: team.team_logos.team_logo[0].url.clone(),
-                wins: outcome_total.wins,
-                losses: outcome_total.losses,
-                ties: outcome_total.ties,
-                percentage: percentage,
+                wins,
+                losses,
+                ties,
+                percentage,
                 games_back: games_back,
                 points_for: team_standings.points_for.unwrap_or("0".to_string()),
                 points_against: team_standings.points_against.unwrap_or("0".to_string()),

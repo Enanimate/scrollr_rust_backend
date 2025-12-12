@@ -31,9 +31,9 @@ pub struct UserLeague {
     pub num_teams: u8,
     pub scoring_type: String,
     pub league_type: String,
-    pub current_week: u8,
-    pub start_week: u8,
-    pub end_week: u8,
+    pub current_week: Option<u8>,
+    pub start_week: Option<u8>,
+    pub end_week: Option<u8>,
     pub season: u16,
     pub game_code: String
 }
@@ -87,5 +87,5 @@ where
     pub position_type: String,
     pub stats: Vec<xml_roster::Stat<T>>,
     #[serde(rename="playerPoints")]
-    pub player_points: PlayerPoints,
+    pub player_points: Option<PlayerPoints>,
 }
