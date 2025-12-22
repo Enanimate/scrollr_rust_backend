@@ -89,3 +89,22 @@ where
     #[serde(rename="playerPoints")]
     pub player_points: Option<PlayerPoints>,
 }
+
+#[derive(Serialize, Debug)]
+pub struct Matchups {
+    pub completed_matches: Vec<Matchup>,
+    pub active_matches: Vec<Matchup>,
+    pub future_matches: Vec<Matchup>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct Matchup {
+    pub teams: Vec<MatchupTeam>
+}
+
+#[derive(Serialize, Debug)]
+pub struct MatchupTeam {
+    pub team_key: String,
+    pub team_name: String,
+    pub team_points: f32,
+}
