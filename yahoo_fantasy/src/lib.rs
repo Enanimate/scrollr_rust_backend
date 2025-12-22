@@ -15,6 +15,7 @@ mod xml_leagues;
 mod xml_standings;
 mod xml_roster;
 mod xml_settings;
+mod xml_matchups;
 mod error;
 pub mod stats;
 pub mod types;

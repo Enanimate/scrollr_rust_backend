@@ -15,7 +15,7 @@ use sports_service::{frequent_poll, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::{cors::{self, AllowOrigin, CorsLayer}, set_header::SetRequestHeaderLayer};
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
-use yahoo_fantasy::{api::{debug_league_stats, get_league_standings, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
+use yahoo_fantasy::{api::{debug_league_stats, get_league_standings, get_matchups, get_team_roster, get_user_leagues}, exchange_for_token, stats::{BasketballStats, FootballStats, HockeyStats, StatDecode}, types::{LeagueStandings, Roster, Tokens}, yahoo};
 
 #[tokio::main]
 async fn main() {
@@ -46,6 +46,7 @@ async fn main() {
         .route("/yahoo/leagues", get(user_leagues).post(user_leagues))
         .route("/yahoo/league/{league_key}/standings", get(league_standings).post(league_standings))
         .route("/yahoo/team/{teamKey}/roster", get(team_roster).post(team_roster))
+        .route("/yahoo/team/{teamKey}/matchups", get(team_matchups).post(team_matchups))
         .route("/yahoo/debug/stats", get(get_debug_league_stats))
         .route("/health", get(|| async { "Hello, World!" }))
         .layer(
@@ -500,4 +501,23 @@ async fn finance_health(State(web_state): State<ServerState>) -> impl IntoRespon
     let health = web_state.finance_health.lock().await.get_health();
 
     Json(health)
+}
+
+async fn team_matchups(Path(team_key): Path<String>, jar: CookieJar, State(web_state): State<ServerState>, headers: HeaderMap, refresh_token: Option<Json<RefreshBody>>) -> Response {
+    let token_option = get_access_token(jar.clone(), headers, web_state.clone(), refresh_token);
+    if token_option.is_none() { return ErrorCodeResponse::new(StatusCode::UNAUTHORIZED, "Unauthorized, missing access_token"); }
+
+    let initial_tokens = token_option.unwrap();
+    let response = get_matchups(&team_key, web_state.client, &initial_tokens).await;
+
+    if let Err(e) = response {
+        error!("Error fetching matchups for {team_key}: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let (matchups, new_tokens) = response.unwrap();
+    let mut headers = HeaderMap::new();
+    let updated_cookies = update_tokens(&mut headers, jar, new_tokens, &initial_tokens.access_type);
+
+    (headers, updated_cookies, Json(matchups)).into_response()
 }
