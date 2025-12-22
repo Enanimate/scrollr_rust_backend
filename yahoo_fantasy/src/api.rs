@@ -3,7 +3,7 @@ pub use oauth2::{http::header, reqwest::Client};
 use secrecy::{ExposeSecret, SecretString};
 use utils::log::{error, info};
 
-use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Roster, Tokens, UserLeague}, xml_leagues, xml_roster, xml_settings::{self}, xml_standings};
+use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Matchup, MatchupTeam, Matchups, Roster, Tokens, UserLeague}, xml_leagues, xml_matchups, xml_roster, xml_settings::{self}, xml_standings};
 
 pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -269,4 +269,54 @@ pub async fn debug_league_stats(client: Client, tokens: &Tokens) -> anyhow::Resu
     }
 
     return Ok((stats, new_tokens));
+}
+
+pub async fn get_matchups(team_key: &str, client: Client, tokens: &Tokens) -> anyhow::Result<(Matchups, Option<(String, String)>)> {
+    let url = format!("/team/{team_key}/matchups");
+
+    let (matchup_info, opt_tokens) = make_request(&url, client, tokens, 2).await?;
+
+    let parsed: xml_matchups::FantasyContent = serde_xml_rs::from_str(&matchup_info)?;
+
+    let mut output = Matchups {
+        completed_matches: Vec::new(),
+        active_matches: Vec::new(),
+        future_matches: Vec::new(),
+    };
+
+    for matchup in parsed.team.matchups.matchup {
+        let matchup_formatted = {
+            let mut data = Vec::new();
+
+            for mtch in matchup.teams.team {
+                data.push(
+                    MatchupTeam {
+                        team_key: mtch.team_key,
+                        team_name: mtch.name,
+                        team_points: mtch.team_points.total,
+                    }
+                );
+            }
+
+            data
+        };
+
+        match matchup.status.as_str() {
+            "postevent" => {
+                output.completed_matches.push(Matchup { teams: matchup_formatted });
+            }
+
+            "midevent" => {
+                output.active_matches.push(Matchup { teams: matchup_formatted });
+            }
+
+            "preevent" => {
+                output.future_matches.push(Matchup { teams: matchup_formatted });
+            }
+
+            _ => ()
+        }
+    }
+
+    return Ok((output, opt_tokens));
 }
