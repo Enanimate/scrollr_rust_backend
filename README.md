@@ -166,3 +166,70 @@ Json Response :
     ]
 }
 ```
+
+##### Team Matchups: /team/{teamKey}/matchups
+
+Authentication
+
+ * Headers:
+ ```
+ Authorization: bearer <Access Token>
+ Content-Type: application/json
+ ```
+ * Request Body: ` { "refresh_token": "<Refresh Token>" } `
+
+Json Response :
+```
+{
+	completed_matches: [
+    	0: {
+        	teams: [
+				0: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				},
+				1: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				}
+			]
+        }
+    ]
+
+	active_matches: [
+    	0: {
+        	teams: [
+				0: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				},
+				1: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				}
+			]
+        }
+    ]
+
+	future_matches: [
+    	0: {
+        	teams: [
+				0: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				},
+				1: {
+					team_key: "Team Key",
+					team_name: "Team Name",
+					team_points: 0.00
+				}
+			]
+        }
+    ]
+}
+```
