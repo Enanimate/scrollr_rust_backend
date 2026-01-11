@@ -21,6 +21,17 @@ pub(crate) async fn connect(subscriptions: Vec<String>, api_key: String, client:
     let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
     println!("WebSocket client connected");
 
+    // Set connection status to connected
+    {
+        let mut health = health_state.lock().await;
+        health.update_health(
+            String::from("connected"),
+            0,
+            0,
+            None,
+        );
+    }
+
     let (writer, reader) = ws_stream.split();
 
     tokio::spawn(ws_send(writer, subscriptions));
@@ -77,24 +88,31 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
                                 if update.message_type == "trade" {
                                     handle_trade_update_batch(update.data, &state).await;
                                 } else if update.message_type == "error" {
-                                    error!("Error message from websocket: {}", msg.to_string());
+                                    let error_msg = msg.to_string();
+                                    error!("Error message from websocket: {}", error_msg);
+                                    state.write().await.last_error_message = Some(error_msg);
                                 } else {
                                     warn!("Non-trade message: {:#?}", update)
                                 }
                             } else {
                                 if msg.to_string().contains("error") {
-                                    error!("Error message from websocket: {}", msg.to_string());
+                                    let error_msg = msg.to_string();
+                                    error!("Error message from websocket: {}", error_msg);
+                                    state.write().await.last_error_message = Some(error_msg);
                                 } else {
                                     warn!("Unexpected websocket message format: {}", msg.to_string());
                                 }
                             }
                         } else if msg.is_close() {
                             error!("Server closed connection");
+                            state.write().await.last_error_message = Some(String::from("Server closed connection"));
                             break;
                         }
                     }
                     Err(e) => {
-                        error!("Error receiving message: {}", e);
+                        let error_msg = format!("Error receiving message: {}", e);
+                        error!("{}", error_msg);
+                        state.write().await.last_error_message = Some(error_msg);
                         break;
                     }
                 }
@@ -107,6 +125,19 @@ async fn ws_read(mut reader: SplitStream<WebSocketStream<tokio_tungstenite::Mayb
     }
 
     info!("WebSocket read loop completed.");
+
+    // Update health status to disconnected
+    {
+        let state_read = state.read().await;
+        let mut health = health_state.lock().await;
+        let current_batch = health.batch_number;
+        health.update_health(
+            String::from("disconnected"),
+            current_batch,
+            state_read.stats.errors,
+            state_read.last_error_message.clone(),
+        );
+    }
 
     if !state.read().await.update_queue.is_empty() {
         info!("Processing final batch before exit...");
@@ -226,6 +257,12 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
     match batch_result {
         Ok(_) => {
             state.stats.total_updates_processed += processed;
+            state.stats.errors += errors;
+
+            // Track last error if there were any errors in this batch
+            if errors > 0 && state.last_error_message.is_none() {
+                state.last_error_message = Some(format!("Batch #{} had {} errors processing trades", batch_num, errors));
+            }
 
             let now = Instant::now();
             let should_log = state.last_log_time.map_or(true, |last| {
@@ -233,9 +270,14 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
             });
 
             let mut health = health_state.lock().await;
-            health.set_batch(batch_num);
+            health.update_health(
+                String::from("connected"),
+                batch_num,
+                state.stats.errors,
+                state.last_error_message.clone(),
+            );
             drop(health);
-            
+
             if should_log {
                 state.last_log_time = Some(now);
                 info!("Batch #{} complete: {} processed, {} errors",
@@ -245,8 +287,10 @@ async fn process_batch(state_arc: Arc<RwLock<WebSocketState>>, client: Arc<Clien
             }
         }
         Err(e) => {
-            warn!("Batch #{} processing error: {}", batch_num, e);
+            let error_msg = format!("Batch #{} processing error: {}", batch_num, e);
+            warn!("{}", error_msg);
             state.stats.errors += 1;
+            state.last_error_message = Some(error_msg);
         }
     }
 

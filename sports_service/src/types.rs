@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
 
 #[derive(Deserialize)]
 pub(crate) struct ScoreboardResponse {
@@ -48,4 +49,45 @@ pub(crate) struct RTeam {
     #[serde(rename = "shortDisplayName")]
     pub short_display_name: String,
     pub logo: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SportsHealth {
+    pub status: String,
+    pub last_poll_time: Option<DateTime<Utc>>,
+    pub polls_completed: u64,
+    pub games_ingested: u64,
+    pub error_count: u64,
+    pub last_error: Option<String>,
+    pub active_leagues: Vec<String>,
+}
+
+impl SportsHealth {
+    pub fn new() -> Self {
+        Self {
+            status: String::from("healthy"),
+            last_poll_time: None,
+            polls_completed: 0,
+            games_ingested: 0,
+            error_count: 0,
+            last_error: None,
+            active_leagues: Vec::new(),
+        }
+    }
+
+    pub(crate) fn update_poll(&mut self, games_count: u64, leagues: Vec<String>) {
+        self.last_poll_time = Some(Utc::now());
+        self.polls_completed += 1;
+        self.games_ingested += games_count;
+        self.active_leagues = leagues;
+    }
+
+    pub(crate) fn record_error(&mut self, error: String) {
+        self.error_count += 1;
+        self.last_error = Some(error);
+    }
+
+    pub fn get_health(&self) -> Self {
+        self.clone()
+    }
 }

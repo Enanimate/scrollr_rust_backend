@@ -47,6 +47,7 @@ pub(crate) struct WebSocketState {
     pub is_processing_batch: bool,
     pub stats: BatchStats,
     pub last_log_time: Option<Instant>,
+    pub last_error_message: Option<String>,
 }
 
 impl WebSocketState {
@@ -57,6 +58,7 @@ impl WebSocketState {
             is_processing_batch: false,
             stats: BatchStats::default(),
             last_log_time: None,
+            last_error_message: None,
         }
     }
 }
@@ -96,25 +98,37 @@ impl FinanceState {
 #[derive(Serialize)]
 pub struct FinanceHealth {
     pub status: String,
+    pub connection_status: String,
     pub batch_number: u64,
+    pub error_count: u64,
+    pub last_error: Option<String>,
 }
 
 impl FinanceHealth {
     pub fn new() -> Self {
         Self {
             status: String::from("healthy"),
+            connection_status: String::from("disconnected"),
             batch_number: 0,
+            error_count: 0,
+            last_error: None,
         }
     }
 
-    pub(crate) fn set_batch(&mut self, number: u64) {
-        self.batch_number = number
+    pub(crate) fn update_health(&mut self, connection_status: String, batch_number: u64, error_count: u64, last_error: Option<String>) {
+        self.connection_status = connection_status;
+        self.batch_number = batch_number;
+        self.error_count = error_count;
+        self.last_error = last_error;
     }
 
     pub fn get_health(&self) -> Self {
         Self {
             status: self.status.clone(),
+            connection_status: self.connection_status.clone(),
             batch_number: self.batch_number,
+            error_count: self.error_count,
+            last_error: self.last_error.clone(),
         }
     }
 }

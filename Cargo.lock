@@ -3556,6 +3556,7 @@ name = "yahoo_fantasy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "oauth2",
  "quick-xml",
  "secrecy",
