@@ -17,6 +17,7 @@ mod xml_roster;
 mod xml_settings;
 mod xml_matchups;
 mod error;
+mod utilities;
 pub mod stats;
 pub mod types;
 pub mod debug;
