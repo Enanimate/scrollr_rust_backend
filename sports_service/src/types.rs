@@ -59,6 +59,7 @@ pub struct SportsHealth {
     pub games_ingested: u64,
     pub error_count: u64,
     pub last_error: Option<String>,
+    pub last_error_time: Option<DateTime<Utc>>,
     pub active_leagues: Vec<String>,
 }
 
@@ -71,6 +72,7 @@ impl SportsHealth {
             games_ingested: 0,
             error_count: 0,
             last_error: None,
+            last_error_time: None,
             active_leagues: Vec::new(),
         }
     }
@@ -85,6 +87,7 @@ impl SportsHealth {
     pub(crate) fn record_error(&mut self, error: String) {
         self.error_count += 1;
         self.last_error = Some(error);
+        self.last_error_time = Some(Utc::now());
     }
 
     pub fn get_health(&self) -> Self {
