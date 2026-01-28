@@ -28,7 +28,7 @@ pub async fn start_sports_service(pool: Arc<PgPool>, health_state: Arc<Mutex<Spo
     info!("Current live games by league: {}", live_games);
 }
 
-pub async fn frequent_poll(leagues: Vec<LeagueConfigs>, pool: &Arc<PgPool>, health_state: Arc<Mutex<SportsHealth>>) {
+pub async fn poll_sports(leagues: Vec<LeagueConfigs>, pool: &Arc<PgPool>, health_state: Arc<Mutex<SportsHealth>>) {
     info!("Frequent poll called for: {:?}", leagues);
     ingest_data(leagues, pool, health_state).await;
 }

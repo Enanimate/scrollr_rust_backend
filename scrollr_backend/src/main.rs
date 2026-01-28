@@ -11,7 +11,7 @@ use scrollr_backend::{ErrorCodeResponse, RefreshBody, SchedulePayload, ServerSta
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sports_service::{frequent_poll, start_sports_service};
+use sports_service::{poll_sports, start_sports_service};
 use tokio_rustls_acme::{AcmeConfig, caches::DirCache, tokio_rustls::rustls::ServerConfig};
 use tower_http::{cors::{self, AllowOrigin, CorsLayer}, set_header::SetRequestHeaderLayer};
 use utils::{database::sports::LeagueConfigs, log::{error, info, init_async_logger, warn}};
@@ -145,7 +145,6 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
         }
 
         "sports" => {
-            info!("Starting frequent polling for the following leagues {:?}", payload.data);
             let mut leagues = Vec::new();
 
             let file_contents = match fs::read_to_string("./configs/leagues.json") {
@@ -164,13 +163,22 @@ async fn handler(State(web_state): State<ServerState>, Json(payload): Json<Sched
                 }
             };
 
-            for league in leagues_to_ingest {
-                if payload.data.contains(&league.name) {
-                    leagues.push(league);
+            // if the payload is empty this is a request that each sport be updated
+            if payload.data.is_empty() {
+                info!("Starting update for sports calendar");
+
+                leagues = leagues_to_ingest;
+            } else {
+                info!("Starting frequent polling for the following leagues {:?}", payload.data);
+
+                for league in leagues_to_ingest {
+                    if payload.data.contains(&league.name) {
+                        leagues.push(league);
+                    }
                 }
             }
 
-            frequent_poll(leagues, &pool, Arc::clone(&web_state.sports_health)).await;
+            poll_sports(leagues, &pool, Arc::clone(&web_state.sports_health)).await;
         }
         _ => warn!("Unexpected POST payload {}", payload.schedule_type),
     }
