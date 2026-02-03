@@ -3,7 +3,7 @@ pub use oauth2::{http::header, reqwest::Client};
 use secrecy::{ExposeSecret, SecretString};
 use utils::log::{error, info};
 
-use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Matchup, MatchupTeam, Matchups, Roster, Tokens, UserLeague}, xml_leagues, xml_matchups, xml_roster, xml_settings::{self}, xml_standings};
+use crate::{debug::LeagueStats, error::YahooError, stats::StatDecode, types::{LeagueStandings, Leagues, Matchup, MatchupTeam, Matchups, Roster, Tokens, UserLeague}, utilities::write_stat_pairs_to_file, xml_leagues, xml_matchups, xml_roster, xml_settings::{self, Stat}, xml_standings};
 
 pub(crate) const YAHOO_BASE_API: &str = "https://fantasysports.yahooapis.com/fantasy/v2";
 
@@ -182,11 +182,32 @@ where
         format!("/team/{team_key}/roster/players/stats")
     };
 
-    let (league_data, opt_tokens) = make_request(&url, client, &tokens, 2).await?;
+    let (league_data, mut opt_tokens) = make_request(&url, client.clone(), &tokens, 2).await?;
 
-    let cleaned: xml_roster::FantasyContent<T> = serde_xml_rs::from_str(&league_data).inspect_err(|e| {
-        error!("Deserialization error in roster: {e}");
-    })?;
+    let cleaned: xml_roster::FantasyContent<T> = match serde_xml_rs::from_str(&league_data) {
+        Ok(data) => data,
+        Err(e) => {
+            let error_msg = e.to_string();
+
+            if error_msg.contains("TryFrom not implemented") && error_msg.contains("Stat ID") {
+                let (league_key, _) = team_key.split_once(".t").unwrap();
+                let (pairs, new_tokens, game_code) = get_stat_pairs(&client, tokens, league_key).await?;
+
+                if let Some(new) = new_tokens {
+                    opt_tokens = Some(new);
+                }
+
+                write_stat_pairs_to_file(&pairs, &game_code)?;
+
+                serde_xml_rs::from_str::<xml_roster::FantasyContent<T>>(&league_data).inspect_err(|e| {
+                    error!("Deserialization error in roster: {e}");
+                })?
+            } else {
+                error!("Deserialization error in roster: {e}");
+                return Err(anyhow::anyhow!("Failed to deserialize roster: {e}"));
+            }
+        }
+    };
 
     let mut roster = Vec::new();
 
@@ -220,6 +241,21 @@ where
     }
 
     return Ok((roster, opt_tokens));
+}
+
+pub async fn get_stat_pairs(client: &Client, tokens: &Tokens, league_key: &str) -> anyhow::Result<(Vec<Stat>, Option<(String, String)>, String)> {
+    let mut new_tokens: Option<(String, String)> = None;
+
+    let (league_data, opt_tokens) = make_request(&format!("/league/{league_key}/settings"), client.clone(), &tokens, 2).await?;
+
+    if let Some(t) = opt_tokens {
+        new_tokens = Some(t);
+    }
+
+    let cleaned: xml_settings::FantasyContent = serde_xml_rs::from_str(&league_data)?;
+    let game_code = cleaned.league.game_code;
+    let stats = cleaned.league.settings.stat_categories.stats.stat;
+    Ok((stats, new_tokens, game_code))
 }
 
 pub async fn debug_league_stats(client: Client, tokens: &Tokens) -> anyhow::Result<(LeagueStats, Option<(String, String)>)> {

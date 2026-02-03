@@ -17,9 +17,12 @@ mod xml_roster;
 mod xml_settings;
 mod xml_matchups;
 mod error;
+mod utilities;
 pub mod stats;
 pub mod types;
 pub mod debug;
+
+pub use types::YahooHealth;
 
 pub async fn yahoo(client_id: String, client_secret: String, callback_url: String) -> Result<(String, String), Box<dyn Error>> {
     let csrf_token = CsrfToken::new_random();

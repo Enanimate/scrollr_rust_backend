@@ -1,5 +1,6 @@
 use serde::Serialize;
 use secrecy::SecretString;
+use chrono::{DateTime, Utc};
 
 use crate::{stats::StatDecode, xml_roster::{self, PlayerPoints}};
 
@@ -107,4 +108,49 @@ pub struct MatchupTeam {
     pub team_key: String,
     pub team_name: String,
     pub team_points: f32,
+}
+
+#[derive(Serialize, Clone)]
+pub struct YahooHealth {
+    pub status: String,
+    pub oauth_status: String,
+    pub last_api_call: Option<DateTime<Utc>>,
+    pub successful_calls: u64,
+    pub error_count: u64,
+    pub last_error: Option<String>,
+}
+
+impl YahooHealth {
+    pub fn new() -> Self {
+        Self {
+            status: String::from("healthy"),
+            oauth_status: String::from("no_token"),
+            last_api_call: None,
+            successful_calls: 0,
+            error_count: 0,
+            last_error: None,
+        }
+    }
+
+    pub fn update_oauth_status(&mut self, has_token: bool) {
+        self.oauth_status = if has_token {
+            String::from("authenticated")
+        } else {
+            String::from("no_token")
+        };
+    }
+
+    pub fn record_successful_call(&mut self) {
+        self.last_api_call = Some(Utc::now());
+        self.successful_calls += 1;
+    }
+
+    pub fn record_error(&mut self, error: String) {
+        self.error_count += 1;
+        self.last_error = Some(error);
+    }
+
+    pub fn get_health(&self) -> Self {
+        self.clone()
+    }
 }
